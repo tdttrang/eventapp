@@ -179,8 +179,7 @@ class Booking(models.Model):
     ticket = models.ForeignKey("Ticket", on_delete=models.CASCADE)
 
     # So luong ve
-    quantity = models.PositiveIntegerField()
-
+    quantity = models.PositiveIntegerField(default=1)  # Thêm default
     # Trang thai don hang
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending")
 
@@ -188,10 +187,12 @@ class Booking(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     # Thoi gian het han giu cho (10 phut)
-    expires_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField(null=True, blank=True)  # Sửa default
 
-    # Luu link anh QR tren Cloudinary
     qr_code = CloudinaryField("qr_code", null=True, blank=True)
+
+    # Lưu order_id của MoMo
+    payment_code = models.CharField(max_length=200, blank=True, null=True)
 
     def save(self, *args, **kwargs):
         # Neu tao moi thi dat thoi gian het han = hien tai + 10 phut

@@ -5,7 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
-from .utils import send_booking_email_brevo
+from .utils import send_booking_email_brevo, create_notification
 from django.shortcuts import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
@@ -22,10 +22,6 @@ from .serializers import FirebaseLoginSerializer
 from rest_framework.viewsets import GenericViewSet
 from django.db.models.functions import TruncMonth, TruncQuarter
 from django.db.models import Count, Sum
-from oauth2_provider.views import TokenView
-from drf_yasg.utils import swagger_auto_schema
-from drf_yasg import openapi
-from django.http import JsonResponse
 from .models import (
     User, Event, EventReview, EventReviewReply,
     Ticket, Booking, Notification
@@ -37,9 +33,14 @@ from .serializers import (
     OrganizerRegisterSerializer, UserRegisterSerializer
 )
 from .permissions import IsApprovedOrganizer, IsOwner, IsAdmin
-from .utils import create_notification
 import traceback
+import hmac
+import hashlib
 import json
+import uuid
+import requests
+from django.conf import settings
+
 # -----------------------
 # 1. UserViewSet
 # Chỉ admin mới được xem danh sách người dùng
@@ -267,15 +268,26 @@ class BookingViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def book(self, request):
-        ticket_id = request.data.get('ticket_id')
-        ticket = get_object_or_404(Ticket, id=ticket_id)
+        try:
+            ticket_id = request.data.get('ticket_id')
+            print(f"Ticket ID: {ticket_id}, User: {request.user}, Authenticated: {request.user.is_authenticated}")
+            ticket = get_object_or_404(Ticket, id=ticket_id)
+            if ticket.event.date <= timezone.now():
+                return Response({'detail': 'Không thể đặt vé cho sự kiện đã diễn ra.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if ticket.event.date <= timezone.now():
-            return Response({'detail': 'Không thể đặt vé cho sự kiện đã diễn ra.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        booking = Booking.objects.create(user=request.user, ticket=ticket, status='booked')
-        serializer = BookingSerializer(booking)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+            quantity = request.data.get('quantity', 1)
+            booking = Booking.objects.create(
+                user=request.user,
+                ticket=ticket,
+                quantity=quantity,
+                status='pending',  # Đổi thành pending để phù hợp với logic thanh toán MoMo
+                expires_at=timezone.now() + timedelta(minutes=10)
+            )
+            serializer = BookingSerializer(booking)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            print(f"Error: {str(e)}")
+            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=['post'], permission_classes=[IsOwner])
     def cancel(self, request, pk=None):
@@ -321,38 +333,38 @@ class BookingViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Bạn không có quyền xác nhận người tham gia cho sự kiện này.'},
                             status=status.HTTP_403_FORBIDDEN)
 
-        if booking.status != 'booked':
+        if booking.status != 'paid':
             return Response({'detail': 'Vé không hợp lệ để check-in.'}, status=status.HTTP_400_BAD_REQUEST)
 
         booking.status = 'checked_in'
         booking.save()
         return Response({'detail': 'Check-in thành công.'})
 
-    @action(detail=True, methods=['post'], permission_classes=[IsOwner])
-    def pay(self, request, pk=None):
-        booking = self.get_object()
+    # @action(detail=True, methods=['post'], permission_classes=[IsOwner])
+    # def pay(self, request, pk=None):
+    #     booking = self.get_object()
+    #
+    #     if booking.status != 'pending':
+    #         return Response({'detail': 'Chỉ có thể thanh toán đơn đang chờ.'}, status=status.HTTP_400_BAD_REQUEST)
+    #
+    #     # Giả lập thanh toán thành công
+    #     booking.status = 'paid'
+    #     booking.save()
+    #
+    #     # Gửi email xác nhận qua Brevo
+    #     try:
+    #         send_booking_email_brevo(
+    #             to_email=request.user.email,
+    #             subject=f"Xác nhận đặt vé - {booking.ticket.event.name}",
+    #             message=f"Bạn đã thanh toán thành công. Mã QR: {booking.qr_code.url}"
+    #         )
+    #     except Exception as e:
+    #         return Response({'detail': 'Thanh toán thành công, nhưng gửi email thất bại.', 'error': str(e)},
+    #                         status=status.HTTP_202_ACCEPTED)
+    #
+    #     return Response({'detail': 'Thanh toán thành công.'})
 
-        if booking.status != 'pending':
-            return Response({'detail': 'Chỉ có thể thanh toán đơn đang chờ.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Giả lập thanh toán thành công
-        booking.status = 'paid'
-        booking.save()
-
-        # Gửi email xác nhận qua Brevo
-        try:
-            send_booking_email_brevo(
-                to_email=request.user.email,
-                subject=f"Xác nhận đặt vé - {booking.ticket.event.name}",
-                message=f"Bạn đã thanh toán thành công. Mã QR: {booking.qr_code.url}"
-            )
-        except Exception as e:
-            return Response({'detail': 'Thanh toán thành công, nhưng gửi email thất bại.', 'error': str(e)},
-                            status=status.HTTP_202_ACCEPTED)
-
-        return Response({'detail': 'Thanh toán thành công.'})
-
-    # gia lap thanh toan qua momo
+    # thanh toan qua momo
     @action(detail=True, methods=['post'], permission_classes=[IsOwner])
     def momo_init(self, request, pk=None):
         booking = self.get_object()
@@ -360,44 +372,115 @@ class BookingViewSet(viewsets.ModelViewSet):
         if booking.status != 'pending':
             return Response({'detail': 'Chỉ có thể thanh toán đơn đang chờ.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Giả lập tạo đơn thanh toán Momo
-        momo_order_id = f"MOMO-{booking.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
-        fake_payment_url = f"https://momo.vn/pay/mock?orderId={momo_order_id}"
+        if booking.expires_at < timezone.now():
+            booking.status = 'cancelled'
+            booking.save()
+            return Response({'detail': 'Đơn hàng đã hết hạn.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Lưu tạm mã đơn hàng nếu cần
-        booking.payment_code = momo_order_id
-        booking.save()
+        # Tính số tiền dựa trên ticket.price và quantity
+        amount = int(booking.ticket.price * booking.quantity)
+        order_id = f"MOMO-{booking.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
+        order_info = f"Thanh toán vé sự kiện {booking.ticket.event.name}"
 
-        return Response({
-            "payment_url": fake_payment_url,
-            "order_id": momo_order_id,
-            "amount": booking.ticket.price
-        })
+        # Tạo chữ ký (signature) cho MoMo
+        raw_signature = (
+            f"accessKey={settings.MOMO_ACCESS_KEY}&amount={amount}&extraData=&ipnUrl={settings.MOMO_IPN_URL}"
+            f"&orderId={order_id}&orderInfo={order_info}&partnerCode={settings.MOMO_PARTNER_CODE}"
+            f"&redirectUrl={settings.MOMO_REDIRECT_URL}&requestId={order_id}&requestType=captureWallet"
+        )
+        signature = hmac.new(
+            settings.MOMO_SECRET_KEY.encode(),
+            raw_signature.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+        # Payload gửi đến MoMo
+        payload = {
+            "partnerCode": settings.MOMO_PARTNER_CODE,
+            "requestId": order_id,
+            "amount": amount,
+            "orderId": order_id,
+            "orderInfo": order_info,
+            "redirectUrl": settings.MOMO_REDIRECT_URL,
+            "ipnUrl": f"{settings.MOMO_IPN_URL}/{booking.id}/momo-callback/",
+            "requestType": "captureWallet",
+            "extraData": "",  # Có thể mã hóa Base64 thông tin bổ sung
+            "lang": "vi",
+            "signature": signature
+        }
+
+        try:
+            response = requests.post(settings.MOMO_ENDPOINT, json=payload)
+            result = response.json()
+            print(f"MoMo request: {payload}")
+            print(f"MoMo response: {result}")
+            if result.get('resultCode') == 0:
+                booking.payment_code = order_id
+                booking.save()
+                return Response({
+                    "payment_url": result.get('payUrl'),
+                    "deeplink": result.get('deeplink'),
+                    "qr_code_url": result.get('qrCodeUrl'),
+                    "order_id": order_id,
+                    "amount": amount
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({"detail": result.get('message')}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 
     @action(detail=True, methods=['post'], permission_classes=[AllowAny], url_path='momo-callback')
     def momo_callback(self, request, pk=None):
         booking = self.get_object()
-        result_code = request.data.get("result_code")
-        message = request.data.get("message", "")
+        data = request.data
+        result_code = data.get("result_code")
+        order_id = data.get('orderId')
+        message = data.get("message", "")
 
-        if result_code != "0":
-            return Response({"detail": "Thanh toán thất bại", "message": message}, status=400)
+        # Kiểm tra chữ ký từ MoMo để đảm bảo an toàn
+        raw_signature = (
+            f"accessKey={settings.MOMO_ACCESS_KEY}&amount={data.get('amount')}&extraData={data.get('extraData')}"
+            f"&message={message}&orderId={order_id}&orderInfo={data.get('orderInfo')}"
+            f"&orderType={data.get('orderType')}&partnerCode={data.get('partnerCode')}"
+            f"&payType={data.get('payType')}&requestId={data.get('requestId')}"
+            f"&responseTime={data.get('responseTime')}&resultCode={result_code}"
+            f"&transId={data.get('transId')}"
+        )
+        signature = hmac.new(
+            settings.MOMO_SECRET_KEY.encode(),
+            raw_signature.encode(),
+            hashlib.sha256
+        ).hexdigest()
 
-        booking.status = "paid"
-        booking.save()
+        if signature != data.get('signature'):
+            return Response({"detail": "Invalid signature"}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            send_booking_email_brevo(
-                to_email=booking.user.email,
-                subject=f"Xác nhận đặt vé - {booking.ticket.event.name}",
-                message=f"Bạn đã thanh toán thành công qua Momo. Mã QR: {booking.qr_code.url}"
-            )
-        except Exception as e:
-            return Response({'detail': 'Thanh toán thành công, nhưng gửi email thất bại.', 'error': str(e)},
-                            status=status.HTTP_202_ACCEPTED)
-
-        return Response({'detail': 'Thanh toán Momo thành công.'})
-
+        if result_code == 0:
+            booking.status = 'paid'
+            booking.expires_at = None
+            # Tạo QR code (giả sử dùng Cloudinary)
+            qr_data = f"Booking-{booking.id}-{booking.ticket.event.name}"
+            qr_image = generate_qr_code(qr_data)  # Hàm tạo QR code
+            booking.qr_code = qr_image
+            booking.save()
+            try:
+                send_booking_email_brevo(
+                    to_email=booking.user.email,
+                    subject=f"Xác nhận đặt vé - {booking.ticket.event.name}",
+                    message=f"Bạn đã thanh toán thành công qua MoMo. Mã QR: {booking.qr_code.url}"
+                )
+            except Exception as e:
+                return Response(
+                    {'detail': 'Thanh toán thành công, nhưng gửi email thất bại.', 'error': str(e)},
+                    status=status.HTTP_202_ACCEPTED
+                )
+            return Response({'detail': 'Thanh toán MoMo thành công.'}, status=status.HTTP_200_OK)
+        else:
+            booking.status = 'cancelled'
+            booking.save()
+            return Response({"detail": "Thanh toán thất bại", "message": message}, status=status.HTTP_400_BAD_REQUEST)
 
 # -----------------------
 # 5. NotificationViewSet

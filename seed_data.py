@@ -1,8 +1,13 @@
-# seed_events.py
 # Vị trí: đặt ở cùng cấp với manage.py
 from django.utils import timezone
 from django.contrib.auth import get_user_model
-from events.models import Event
+from events.models import Event, Ticket
+import os
+import django
+
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'eventapp_project.settings')
+django.setup()
 
 # 1) Tạo (hoặc lấy) organizer dùng để gán cho tất cả sự kiện
 User = get_user_model()
@@ -35,8 +40,8 @@ events_data = [
         "capacity": 800,
         "media": None,  # Có thể thay bằng public_id Cloudinary nếu muốn
         "category": "Ẩm Thực",
-        "ticket_price_regular": 50000,
-        "ticket_price_vip": 100000,
+        "ticket_price_regular": 50000.00,
+        "ticket_price_vip": 100000.00,
     },
     {
         "name": "Live Concert Sơn Tùng M-TP",
@@ -46,8 +51,8 @@ events_data = [
         "capacity": 20000,
         "media": None,
         "category": "Âm Nhạc",
-        "ticket_price_regular": 300000,
-        "ticket_price_vip": 800000,
+        "ticket_price_regular": 300000.00,
+        "ticket_price_vip": 800000.00,
     },
     {
         "name": "Triển Lãm Công Nghệ TechXpo 2025",
@@ -57,8 +62,8 @@ events_data = [
         "capacity": 1200,
         "media": None,
         "category": "Công Nghệ",
-        "ticket_price_regular": 100000,
-        "ticket_price_vip": 200000,
+        "ticket_price_regular": 100000.00,
+        "ticket_price_vip": 200000.00,
     },
     {
         "name": "Giải Marathon Thành Phố",
@@ -68,8 +73,8 @@ events_data = [
         "capacity": 5000,
         "media": None,
         "category": "Thể Thao",
-        "ticket_price_regular": 150000,
-        "ticket_price_vip": 300000,
+        "ticket_price_regular": 150000.00,
+        "ticket_price_vip": 300000.00,
     },
     {
         "name": "Festival Văn Hóa Nhật Bản",
@@ -79,8 +84,8 @@ events_data = [
         "capacity": 2000,
         "media": None,
         "category": "Văn Hóa",
-        "ticket_price_regular": 90000,
-        "ticket_price_vip": 180000,
+        "ticket_price_regular": 90000.00,
+        "ticket_price_vip": 180000.00,
     },
     {
         "name": "Đêm Nhạc Trịnh Công Sơn",
@@ -90,8 +95,8 @@ events_data = [
         "capacity": 1500,
         "media": None,
         "category": "Âm Nhạc",
-        "ticket_price_regular": 200000,
-        "ticket_price_vip": 400000,
+        "ticket_price_regular": 200000.00,
+        "ticket_price_vip": 400000.00,
     },
     {
         "name": "Workshop Lập Trình Python",
@@ -101,8 +106,8 @@ events_data = [
         "capacity": 200,
         "media": None,
         "category": "Giáo Dục",
-        "ticket_price_regular": 100000,
-        "ticket_price_vip": 180000,
+        "ticket_price_regular": 100000.00,
+        "ticket_price_vip": 180000.00,
     },
     {
         "name": "Liên Hoan Phim Việt Nam",
@@ -112,8 +117,8 @@ events_data = [
         "capacity": 1000,
         "media": None,
         "category": "Phim Ảnh",
-        "ticket_price_regular": 150000,
-        "ticket_price_vip": 300000,
+        "ticket_price_regular": 150000.00,
+        "ticket_price_vip": 300000.00,
     },
     {
         "name": "Triển Lãm Mỹ Thuật Đương Đại",
@@ -123,8 +128,8 @@ events_data = [
         "capacity": 600,
         "media": None,
         "category": "Nghệ Thuật",
-        "ticket_price_regular": 70000,
-        "ticket_price_vip": 140000,
+        "ticket_price_regular": 70000.00,
+        "ticket_price_vip": 140000.00,
     },
     {
         "name": "Lễ Hội Ánh Sáng",
@@ -134,14 +139,14 @@ events_data = [
         "capacity": 3000,
         "media": None,
         "category": "Lễ Hội",
-        "ticket_price_regular": 80000,
-        "ticket_price_vip": 160000,
+        "ticket_price_regular": 80000.00,
+        "ticket_price_vip": 160000.00,
     },
 ]
 
 # 3) Upsert 10 sự kiện (update_or_create để idempotent)
 for data in events_data:
-    Event.objects.update_or_create(
+    event, created = Event.objects.update_or_create(
         name=data["name"],
         defaults={
             "description": data["description"],
@@ -153,7 +158,25 @@ for data in events_data:
             "category": data["category"],
             "ticket_price_regular": data["ticket_price_regular"],
             "ticket_price_vip": data["ticket_price_vip"],
-        },
+        }
+    )
+    # Tạo vé thường (70% capacity)
+    Ticket.objects.update_or_create(
+        event=event,
+        ticket_class="normal",
+        defaults={
+            "price": data["ticket_price_regular"],
+            "quantity": int(event.capacity * 0.7),  # 70% capacity
+        }
+    )
+    # Tạo vé VIP (30% capacity)
+    Ticket.objects.update_or_create(
+        event=event,
+        ticket_class="VIP",
+        defaults={
+            "price": data["ticket_price_vip"],
+            "quantity": int(event.capacity * 0.3),  # 30% capacity
+        }
     )
 
-print("✅ Đã seed 10 sự kiện thành công.")
+print("✅ Đã seed 10 sự kiện và 20 vé (thường + VIP) với số lượng thực tế.")

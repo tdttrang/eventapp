@@ -12,7 +12,11 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from pathlib import Path
 import firebase_admin
+import environ
+import os
 from firebase_admin import credentials
+from celery.schedules import crontab
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -29,9 +33,12 @@ DEBUG = True
 
 ALLOWED_HOSTS = []
 
+# Đọc các biến môi trường từ file .env
+env = environ.Env()
+environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
+
 
 # Application definition
-
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -91,10 +98,21 @@ WSGI_APPLICATION = 'eventapp.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.sqlite3',
+#         'NAME': BASE_DIR / 'db.sqlite3',
+#     }
+# }
+
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'eventapp_db',           # Tên database bạn đã tạo
+        'USER': 'postgres',              # Tên người dùng PostgreSQL
+        'PASSWORD': '250304',            # Mật khẩu PostgreSQL
+        'HOST': '127.0.0.1',             # Hoặc địa chỉ IP của máy chủ database
+        'PORT': '5432',                  # Cổng mặc định của PostgreSQL
     }
 }
 
@@ -123,8 +141,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
-
+TIME_ZONE = 'Asia/Ho_Chi_Minh'
 USE_I18N = True
 
 USE_TZ = True
@@ -197,7 +214,40 @@ OAUTH2_PROVIDER = {
     "OAUTH2_VALIDATOR_CLASS": "oauth2_provider.oauth2_validators.OAuth2Validator",
 }
 
+# MoMo settings
+MOMO_PARTNER_CODE = env('MOMO_PARTNER_CODE')
+MOMO_ACCESS_KEY = env('MOMO_ACCESS_KEY')
+MOMO_SECRET_KEY = env('MOMO_SECRET_KEY')
+MOMO_ENDPOINT = env('MOMO_ENDPOINT')
+MOMO_REDIRECT_URL = env('MOMO_REDIRECT_URL')
+MOMO_IPN_URL = env('MOMO_IPN_URL')
 
+# Cau hinh Celery su dung Redis lam broker
+CELERY_BROKER_URL = 'redis://localhost:6379/0'   # Ket noi den Redis local
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+
+
+# Cau hinh timezone cho Celery
+CELERY_TIMEZONE = 'UTC'
+CELERY_ENABLE_UTC = True
+
+# cau hinh gui mail khi thong bao nhac nho
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp-relay.brevo.com'  # ten may chu SMTP cua Brevo
+EMAIL_PORT = 587                     # cong TLS
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = env('EMAIL_HOST_USER')         # thuong la email dang ky Brevo
+EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD') # SMTP Key tao trong Brevo
+DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL')             # from address mac dinh
+
+
+# tao periodic task (celery beat)
+CELERY_BEAT_SCHEDULE = {
+    'send-event-reminders-every-hour': {
+        'task': 'events.tasks.send_event_reminders',
+        'schedule': 3600,  # chay moi gio
+    },
+}
 
 
 

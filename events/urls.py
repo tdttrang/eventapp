@@ -22,5 +22,9 @@ router.register(r'admin/stats', AdminStatsViewSet, basename='admin-stats')
 router.register(r'firebase-login', FirebaseLoginViewSet, basename='firebase-login')
 urlpatterns = [
     path('', include(router.urls)),
+    # Thêm các endpoint tùy chỉnh cho MoMo
+    path('bookings/<int:pk>/momo-init/', BookingViewSet.as_view({'post': 'momo_init'}), name='booking-momo-init'),
+    path('bookings/<int:pk>/momo-callback/', BookingViewSet.as_view({'post': 'momo_callback'}),
+         name='booking-momo-callback'),
 ]
 

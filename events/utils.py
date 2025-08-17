@@ -1,6 +1,9 @@
 from .models import Notification
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
+import qrcode
+from cloudinary.uploader import upload
+
 
 def create_notification(user, notification_type, subject, message, related_object_id=None):
     """
@@ -30,3 +33,12 @@ def send_booking_email_brevo(to_email, subject, message):
         api_instance.send_transac_email(send_smtp_email)
     except ApiException as e:
         print(f"Lỗi gửi email qua Brevo: {e}")
+
+def generate_qr_code(data):
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image(fill='black', back_color='white')
+    img.save('qr_code.png')
+    response = upload('qr_code.png', resource_type='image')
+    return response['public_id']
