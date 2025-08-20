@@ -19,6 +19,7 @@ colorama==0.4.6
 cron-descriptor==1.4.5
 cryptography==45.0.6
 defusedxml==0.7.1
+dj-database-url==3.0.1
 Django==5.2.5
 django-celery-beat==2.8.1
 django-cloudinary-storage==0.3.0
