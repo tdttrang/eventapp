@@ -22,7 +22,7 @@ SECRET_KEY = env('SECRET_KEY', default='fallback-key')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env.bool('DEBUG', default=False)
 
-ALLOWED_HOSTS = ["eventapp-production-bcaa.up.railway.app"]
+ALLOWED_HOSTS = ["*", "eventapp-production-bcaa.up.railway.app", "localhost", "127.0.0.1"]
 
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
@@ -45,7 +45,7 @@ INSTALLED_APPS = [
     'oauth2_provider',
     'drf_yasg',
     'social_django',
-
+    "django_filters",
 ]
 
 MIDDLEWARE = [
