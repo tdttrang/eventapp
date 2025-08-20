@@ -1,7 +1,12 @@
 # eventapp_project/celery.py
+#
+# import eventlet
+# eventlet.monkey_patch()
+import platform
 
-import eventlet
-eventlet.monkey_patch()
+if platform.system() != "Windows":
+    import eventlet
+    eventlet.monkey_patch()
 
 import os
 from celery import Celery

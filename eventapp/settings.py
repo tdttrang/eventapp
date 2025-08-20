@@ -254,5 +254,10 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
+CSRF_TRUSTED_ORIGINS = [
+    "https://eventapp-production-bcaa.up.railway.app",
+]
+
+
 
 
