@@ -3,6 +3,8 @@ from django.urls import path, include
 from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
+from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth.decorators import login_required
 
 schema_view = get_schema_view(
    openapi.Info(
@@ -23,6 +25,14 @@ urlpatterns = [
     path('o/', include('oauth2_provider.urls', namespace='oauth2_provider')),
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),  # 👈 thêm dòng này
 
+]
+
+urlpatterns += [
+    path(
+        'swagger/',
+        csrf_exempt(schema_view.with_ui('swagger', cache_timeout=0)),
+        name='schema-swagger-ui'
+    ),
 ]
 
 # id CZy7OJ2lLSstjQ2ZDjTa5uesQ0nMfjBScorujxEc
