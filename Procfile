@@ -1,3 +1,5 @@
-# Procfile
+# chạy migrate khi deploy
 release: python manage.py migrate
-web: gunicorn eventapp.wsgi:application --worker-class eventlet --bind 0.0.0.0:8080
+
+# start gunicorn cho web server
+web: gunicorn eventapp.wsgi:application --bind 0.0.0.0:8080
