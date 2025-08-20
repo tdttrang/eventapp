@@ -16,7 +16,7 @@ import environ
 import os
 from firebase_admin import credentials
 from celery.schedules import crontab
-
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -26,16 +26,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-kaf66v+t*@ttm28za8-waf-99ne4$on-c34m!4g--ntf6!0wo5'
-
+SECRET_KEY = env('SECRET_KEY', default='fallback-key')
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = env.bool('DEBUG', default=False)
 
-ALLOWED_HOSTS = ['eventapp-backend.onrender.com']
+ALLOWED_HOSTS = ['*']
 
 # Đọc các biến môi trường từ file .env
 env = environ.Env()
 environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
+
+STATIC_URL = '/static/'
+STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 
 # Application definition
@@ -105,15 +108,19 @@ WSGI_APPLICATION = 'eventapp.wsgi.application'
 #     }
 # }
 
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': 'eventapp_db',           # Tên database bạn đã tạo
+#         'USER': 'postgres',              # Tên người dùng PostgreSQL
+#         'PASSWORD': '250304',            # Mật khẩu PostgreSQL
+#         'HOST': '127.0.0.1',             # Hoặc địa chỉ IP của máy chủ database
+#         'PORT': '5432',                  # Cổng mặc định của PostgreSQL
+#     }
+# }
+
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'eventapp_db',           # Tên database bạn đã tạo
-        'USER': 'postgres',              # Tên người dùng PostgreSQL
-        'PASSWORD': '250304',            # Mật khẩu PostgreSQL
-        'HOST': '127.0.0.1',             # Hoặc địa chỉ IP của máy chủ database
-        'PORT': '5432',                  # Cổng mặc định của PostgreSQL
-    }
+    'default': dj_database_url.config(default=env('DATABASE_URL'))
 }
 
 

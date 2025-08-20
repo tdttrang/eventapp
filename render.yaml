@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: eventapp-backend
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn eventapp.wsgi:application
-    envVars:
-      - key: DJANGO_SETTINGS_MODULE
-        value: eventapp.settings
