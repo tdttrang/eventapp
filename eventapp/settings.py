@@ -2,6 +2,7 @@ from pathlib import Path
 import firebase_admin
 import environ
 import os
+import json
 from firebase_admin import credentials
 from celery.schedules import crontab
 import dj_database_url
@@ -200,8 +201,15 @@ AUTHENTICATION_BACKENDS = (
 )
 
 # cau hinh gg oauth
+# try:
+#     FIREBASE_CRED = credentials.Certificate('firebase_key.json')
+#     firebase_admin.initialize_app(FIREBASE_CRED)
+# except Exception as e:
+#     print("Firebase init failed:", e)
 try:
-    FIREBASE_CRED = credentials.Certificate('firebase_key.json')
+    firebase_json = env('FIREBASE_KEY')
+    firebase_dict = json.loads(firebase_json)
+    FIREBASE_CRED = credentials.Certificate(firebase_dict)
     firebase_admin.initialize_app(FIREBASE_CRED)
 except Exception as e:
     print("Firebase init failed:", e)
