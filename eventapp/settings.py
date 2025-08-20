@@ -31,7 +31,7 @@ SECRET_KEY = 'django-insecure-kaf66v+t*@ttm28za8-waf-99ne4$on-c34m!4g--ntf6!0wo5
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['eventapp-backend.onrender.com']
 
 # Đọc các biến môi trường từ file .env
 env = environ.Env()
@@ -170,6 +170,9 @@ REST_FRAMEWORK = {
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ],
+
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 10,  # số item mỗi trang, 10 sự kiện
 }
 
 SWAGGER_SETTINGS = {
