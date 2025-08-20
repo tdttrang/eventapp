@@ -5,9 +5,11 @@
 import platform
 
 if platform.system() != "Windows":
-    import eventlet
-    eventlet.monkey_patch()
-
+    try:
+        import eventlet
+        eventlet.monkey_patch()
+    except ImportError:
+        pass
 import os
 from celery import Celery
 

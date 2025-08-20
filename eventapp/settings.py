@@ -22,11 +22,11 @@ SECRET_KEY = env('SECRET_KEY', default='fallback-key')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env.bool('DEBUG', default=False)
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ["eventapp-production-bcaa.up.railway.app"]
 
 STATIC_URL = '/static/'
-STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATIC_ROOT = os.path.join(BASE_DIR, 'static')  # 👈 dùng 'static' thay vì 'staticfiles'
+# STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 
 # Application definition
@@ -58,8 +58,8 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'social_django.middleware.SocialAuthExceptionMiddleware',
-
 ]
+
 CORS_ALLOW_ALL_ORIGINS = True  # tam thoi cho nhanh khi connect expo
 AUTH_USER_MODEL = 'events.User'
 

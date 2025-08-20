@@ -27,14 +27,6 @@ urlpatterns = [
 
 ]
 
-urlpatterns += [
-    path(
-        'swagger/',
-        csrf_exempt(schema_view.with_ui('swagger', cache_timeout=0)),
-        name='schema-swagger-ui'
-    ),
-]
-
 # id CZy7OJ2lLSstjQ2ZDjTa5uesQ0nMfjBScorujxEc
 # secret R0S1BR5aUTturGZwfpM9dZsL8JXD3wWg973yzSqvFagnwvxCZJKOayd4QLZkihivSKg1fUtTkrdtr5Z14EtzREHoKQbgrVx85V4XkB6MMVVGPeVuTvcPiHSJCyiVD4RM
 
