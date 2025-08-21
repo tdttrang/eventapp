@@ -32,7 +32,6 @@ djangorestframework==3.16.1
 dnspython==2.7.0
 drf-yasg==1.21.10
 ecdsa==0.19.1
-eventlet==0.40.2
 fastapi==0.116.1
 firebase_admin==7.1.0
 google-api-core==2.25.1
