@@ -1,16 +1,33 @@
 # Vị trí: đặt ở cùng cấp với manage.py
+# Vị trí: đặt cùng cấp với manage.py
+import os
+import django
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from events.models import Event, Ticket
-import os
-import django
 
-
+# Khởi tạo Django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'eventapp_project.settings')
 django.setup()
 
-# 1) Tạo (hoặc lấy) organizer dùng để gán cho tất cả sự kiện
 User = get_user_model()
+
+# 1) Tạo tài khoản admin nếu chưa có
+admin_username = "admin"
+admin_email = "admin@example.com"
+admin_password = "123456"  # Có thể dùng biến môi trường để bảo mật hơn
+
+if not User.objects.filter(username=admin_username).exists():
+    User.objects.create_superuser(
+        username=admin_username,
+        email=admin_email,
+        password=admin_password
+    )
+    print(f"✅ Đã tạo tài khoản admin: {admin_username}")
+else:
+    print(f"⚠️ Tài khoản admin '{admin_username}' đã tồn tại")
+
+# 2) Tạo (hoặc lấy) organizer dùng để gán cho tất cả sự kiện
 organizer, created = User.objects.get_or_create(
     username="organizer_demo",
     defaults={
@@ -20,15 +37,17 @@ organizer, created = User.objects.get_or_create(
     },
 )
 if created:
-    # đặt mật khẩu đúng chuẩn (hash)
     organizer.set_password("123456")
-    # nếu User của cậu có các field role/is_approved thì set luôn
     try:
-        organizer.role = "organizer"      # nếu không có field này thì bỏ qua
-        organizer.is_approved = True      # nếu không có field này thì bỏ qua
+        organizer.role = "organizer"
+        organizer.is_approved = True
     except Exception:
         pass
     organizer.save()
+    print("✅ Đã tạo organizer_demo")
+else:
+    print("⚠️ organizer_demo đã tồn tại")
+
 
 # 2) Danh sách 10 sự kiện mẫu (ngày đều ở tương lai)
 events_data = [
