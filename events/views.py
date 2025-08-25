@@ -52,7 +52,7 @@ class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAdminUser]
 
     # tạo endpoint /users/register, mở quyền cho tất cả (allowany)
-    @action(detail=False, methods=['post'], permission_classes=[], serializer_class=UserRegisterSerializer,
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny], serializer_class=UserRegisterSerializer,
             url_path='register')
     def register(self, request):
         serializer = self.get_serializer(data=request.data)

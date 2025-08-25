@@ -53,11 +53,16 @@ class UserRegisterSerializer(serializers.ModelSerializer):
         fields = ['username', 'email', 'password']
 
     def create(self, validated_data):
+        if User.objects.filter(email=validated_data['email']).exists():
+            raise serializers.ValidationError({"email": "Email đã được sử dụng"})
+
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data.get('email'),
             password=validated_data['password']
         )
+        user.role = "attendee" # mặc định attendee
+        user.save()
         return user
 
 # -----------------------
