@@ -202,6 +202,10 @@ CLOUDINARY = {
     'api_key': env('CLOUDINARY_API_KEY'),
     'api_secret': env('CLOUDINARY_API_SECRET')
 }
+# In ra các biến để kiểm tra trong log
+print("CLOUDINARY_CLOUD_NAME:", env('CLOUDINARY_CLOUD_NAME'))
+print("CLOUDINARY_API_KEY:", env('CLOUDINARY_API_KEY'))
+print("CLOUDINARY_API_SECRET:", env('CLOUDINARY_API_SECRET'))
 
 
 AUTHENTICATION_BACKENDS = (
