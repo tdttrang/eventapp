@@ -198,9 +198,9 @@ SWAGGER_SETTINGS = {
 # client_secret = iFG4l6Ng6tlsJLVvDhglbbuAzR5Z1kFBJMHHhgITMWRqdcSJdiG3pxQFnXPSFpDIMdFNKMoXwnGE1E04MlTfVIkRnwFUWQWLvHyZpItP1SNcAdcHbXNFIHJdmj1K3eW8
 
 CLOUDINARY = {
-    'cloud_name': 'dachbxwws',
-    'api_key': '527949382554684',
-    'api_secret': '1IKkyJfTMb_KR8LU0BIz1S9W_eQ'
+    'cloud_name': env('CLOUDINARY_CLOUD_NAME'),
+    'api_key': env('CLOUDINARY_API_KEY'),
+    'api_secret': env('CLOUDINARY_API_SECRET')
 }
 
 
