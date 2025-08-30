@@ -29,7 +29,7 @@ urlpatterns = [
 
     # endpoint vnpay
     path("api/vnpay_ipn/", vnpay_ipn, name="vnpay_ipn"),
-    path("vnpay_return/", vnpay_return, name="vnpay_return"),
+    path("api/vnpay_return/", vnpay_return, name="vnpay_return"),
 
 ]
 
