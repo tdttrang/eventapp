@@ -501,8 +501,10 @@ class BookingViewSet(viewsets.ModelViewSet):
         # Tính tổng tiền từ các chi tiết vé
         total_amount = sum([d.ticket.price * d.quantity for d in booking.details.all()])
 
+        # Tạo mã giao dịch riêng (mỗi booking 1 order_id)
         order_id = f"{booking.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
 
+        # Các tham số gửi qua VNPay
         vnp_Params = {
             "vnp_Version": "2.1.0",
             "vnp_Command": "pay",
@@ -518,18 +520,17 @@ class BookingViewSet(viewsets.ModelViewSet):
             "vnp_CreateDate": timezone.now().strftime("%Y%m%d%H%M%S"),
         }
 
-        # Sắp xếp tham số
+        # Sắp xếp tham số theo alphabet
         sorted_params = sorted(vnp_Params.items())
-        query_string = urllib.parse.urlencode(sorted_params)
-
-        # Tạo hash
         hashdata = "&".join([f"{k}={v}" for k, v in sorted_params])
-        secure_hash = hmac.new(
-            settings.VNP_HASH_SECRET.encode("utf-8"),
-            hashdata.encode("utf-8"),
-            hashlib.sha512
-        ).hexdigest()
 
+        # Tạo chữ ký SHA512 (theo tài liệu VNPay: secret + hashdata)
+        secure_hash = hashlib.sha512((settings.VNP_HASH_SECRET + hashdata).encode("utf-8")).hexdigest()
+
+        # Encode query string (dùng quote để encode space thành %20 chứ không phải +)
+        query_string = urllib.parse.urlencode(sorted_params, quote_via=urllib.parse.quote)
+
+        # Tạo URL thanh toán
         payment_url = f"{settings.VNP_URL}?{query_string}&vnp_SecureHash={secure_hash}"
 
         return Response({"payment_url": payment_url})
@@ -708,38 +709,22 @@ class FirebaseLoginViewSet(viewsets.ModelViewSet):
 
 @csrf_exempt
 def vnpay_ipn(request):
+    # Lấy toàn bộ dữ liệu query string từ VNPay
     inputData = request.GET.dict()
-    vnp_SecureHash = inputData.pop("vnp_SecureHash", None)
+    vnp_SecureHash = inputData.pop("vnp_SecureHash", None)  # lấy hash ra để kiểm tra
 
-    # Sắp xếp tham số theo thứ tự alphabet
+    # Sắp xếp tham số theo alphabet
     ordered_data = OrderedDict(sorted(inputData.items()))
-
-    # Tạo chuỗi hashData
     hashData = "&".join([f"{k}={v}" for k, v in ordered_data.items()])
 
-    # Tạo chữ ký
-    secure_hash = hmac.new(
-        bytes(settings.VNP_HASH_SECRET, "utf-8"),
-        bytes(hashData, "utf-8"),
-        hashlib.sha512
-    ).hexdigest()
+    # Tạo lại chữ ký SHA512
+    secure_hash = hashlib.sha512((settings.VNP_HASH_SECRET + hashData).encode("utf-8")).hexdigest()
 
+    # So sánh chữ ký
     if secure_hash != vnp_SecureHash:
         return JsonResponse({"RspCode": "97", "Message": "Invalid signature"})
 
-    # Kiểm tra chữ ký
-    sorted_params = sorted(inputData.items())
-    hashData = "&".join([f"{k}={v}" for k, v in sorted_params])
-    secure_hash = hmac.new(
-        settings.VNP_HASH_SECRET.encode("utf-8"),
-        hashData.encode("utf-8"),
-        hashlib.sha512
-    ).hexdigest()
-
-    if secure_hash != vnp_SecureHash:
-        return JsonResponse({"RspCode": "97", "Message": "Invalid signature"})
-
-    # Lấy booking_id từ vnp_OrderInfo
+    # Lấy booking_id từ OrderInfo
     order_info = inputData.get("vnp_OrderInfo", "")
     booking_id = order_info.replace("Thanh toan booking ", "").strip()
 
@@ -748,12 +733,15 @@ def vnpay_ipn(request):
     except Booking.DoesNotExist:
         return JsonResponse({"RspCode": "01", "Message": "Booking not found"})
 
+    # Kiểm tra mã phản hồi từ VNPay
     if inputData.get("vnp_ResponseCode") == "00":
+        # Thanh toán thành công
         booking.status = "paid"
         booking.payment_code = inputData.get("vnp_TransactionNo")
         booking.save()
         return JsonResponse({"RspCode": "00", "Message": "Confirm Success"})
     else:
+        # Thanh toán thất bại
         booking.status = "cancelled"
         booking.save()
         return JsonResponse({"RspCode": "00", "Message": "Payment failed"})
