@@ -44,6 +44,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from collections import OrderedDict
 from .vnpay import vnpay
+from django.http import HttpResponse
+
 
 # -----------------------
 # 1. UserViewSet
@@ -725,4 +727,11 @@ def vnpay_ipn(request):
         booking.status = "cancelled"
         booking.save()
         return JsonResponse({"RspCode": "00", "Message": "Payment failed"})
+
+def vnpay_return(request):
+    vnp_ResponseCode = request.GET.get("vnp_ResponseCode")
+    if vnp_ResponseCode == "00":
+        return HttpResponse("Thanh toan thanh cong!")
+    else:
+        return HttpResponse("Thanh toan that bai!")
 
