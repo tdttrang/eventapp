@@ -176,10 +176,10 @@ class Booking(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
 
     # Ve duoc dat
-    ticket = models.ForeignKey("Ticket", on_delete=models.CASCADE)
+    # ticket = models.ForeignKey("Ticket", on_delete=models.CASCADE)
 
     # So luong ve
-    quantity = models.PositiveIntegerField(default=1)  # Thêm default
+    # quantity = models.PositiveIntegerField(default=1)  # Thêm default
     # Trang thai don hang
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending")
 
@@ -202,6 +202,15 @@ class Booking(models.Model):
 
     def __str__(self):
         return f"Booking {self.id} - {self.user.username}"
+
+
+class BookingDetail(models.Model):
+    booking = models.ForeignKey("Booking", on_delete=models.CASCADE, related_name="details")
+    ticket = models.ForeignKey("Ticket", on_delete=models.CASCADE)
+    quantity = models.PositiveIntegerField(default=1)
+
+    def __str__(self):
+        return f"Booking {self.booking.id} - {self.ticket.ticket_class} x{self.quantity}"
 
 
 # -----------------------

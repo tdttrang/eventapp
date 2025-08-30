@@ -203,9 +203,9 @@ CLOUDINARY = {
     'api_secret': env('CLOUDINARY_API_SECRET')
 }
 # In ra các biến để kiểm tra trong log
-print("CLOUDINARY_CLOUD_NAME:", env('CLOUDINARY_CLOUD_NAME'))
-print("CLOUDINARY_API_KEY:", env('CLOUDINARY_API_KEY'))
-print("CLOUDINARY_API_SECRET:", env('CLOUDINARY_API_SECRET'))
+# print("CLOUDINARY_CLOUD_NAME:", env('CLOUDINARY_CLOUD_NAME'))
+# print("CLOUDINARY_API_KEY:", env('CLOUDINARY_API_KEY'))
+# print("CLOUDINARY_API_SECRET:", env('CLOUDINARY_API_SECRET'))
 
 
 AUTHENTICATION_BACKENDS = (
@@ -239,6 +239,13 @@ MOMO_SECRET_KEY = env('MOMO_SECRET_KEY')
 MOMO_ENDPOINT = env('MOMO_ENDPOINT')
 MOMO_REDIRECT_URL = env('MOMO_REDIRECT_URL')
 MOMO_IPN_URL = env('MOMO_IPN_URL')
+
+
+VNP_TMN_CODE = os.getenv("VNP_TMN_CODE")
+VNP_HASH_SECRET = os.getenv("VNP_HASH_SECRET")
+VNP_URL = os.getenv("VNP_URL")
+VNP_RETURN_URL = os.getenv("VNP_RETURN_URL")
+VNP_IPN_URL = os.getenv("VNP_IPN_URL")
 
 # Cau hinh Celery su dung Redis lam broker
 CELERY_BROKER_URL = 'redis://localhost:6379/0'   # Ket noi den Redis local

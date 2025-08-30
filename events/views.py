@@ -34,13 +34,14 @@ from .serializers import (
 )
 from .permissions import IsApprovedOrganizer, IsOwner, IsAdmin
 import traceback
-import hmac
-import hashlib
+import urllib.parse, hmac, hashlib
 import json
 import uuid
 import requests
 from django.conf import settings
 from .utils import generate_qr_code
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
 
 # -----------------------
 # 1. UserViewSet
@@ -242,7 +243,7 @@ class TicketViewSet(viewsets.ModelViewSet):
 class BookingViewSet(viewsets.ModelViewSet):
     queryset = Booking.objects.all()
     serializer_class = BookingSerializer
-    permission_classes = [IsOwner]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         # Chỉ hiển thị booking của người dùng hiện tại
@@ -262,10 +263,17 @@ class BookingViewSet(viewsets.ModelViewSet):
         )
 
     def get_serializer_class(self):
-        # Dùng BookingCreateSerializer khi tạo mới để kiểm tra số lượng vé
-        if self.action == 'create':
+        if self.action in ["create", "book"]:
             return BookingCreateSerializer
         return BookingSerializer
+
+        # override create -> cho phép tạo booking nhiều vé
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        booking = serializer.save()
+        return Response(BookingSerializer(booking).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def book(self, request):
@@ -483,6 +491,48 @@ class BookingViewSet(viewsets.ModelViewSet):
             booking.save()
             return Response({"detail": "Thanh toán thất bại", "message": message}, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def vnpay_init(self, request, pk=None):
+        booking = self.get_object()
+
+        if booking.status != "pending":
+            return Response({"detail": "Booking không ở trạng thái pending"}, status=400)
+
+        # Tính tổng tiền từ các chi tiết vé
+        total_amount = sum([d.ticket.price * d.quantity for d in booking.details.all()])
+
+        order_id = f"{booking.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
+
+        vnp_Params = {
+            "vnp_Version": "2.1.0",
+            "vnp_Command": "pay",
+            "vnp_TmnCode": settings.VNP_TMN_CODE,
+            "vnp_Amount": int(total_amount) * 100,  # VNPay yêu cầu nhân 100
+            "vnp_CurrCode": "VND",
+            "vnp_TxnRef": order_id,
+            "vnp_OrderInfo": f"Thanh toan booking {booking.id}",
+            "vnp_OrderType": "other",
+            "vnp_Locale": "vn",
+            "vnp_ReturnUrl": settings.VNP_RETURN_URL,
+            "vnp_IpAddr": request.META.get("REMOTE_ADDR"),
+            "vnp_CreateDate": timezone.now().strftime("%Y%m%d%H%M%S"),
+        }
+
+        # Sắp xếp tham số
+        sorted_params = sorted(vnp_Params.items())
+        query_string = urllib.parse.urlencode(sorted_params)
+
+        # Tạo hash
+        hashdata = "&".join([f"{k}={v}" for k, v in sorted_params])
+        secure_hash = hmac.new(
+            settings.VNP_HASH_SECRET.encode("utf-8"),
+            hashdata.encode("utf-8"),
+            hashlib.sha512
+        ).hexdigest()
+
+        payment_url = f"{settings.VNP_URL}?{query_string}&vnp_SecureHash={secure_hash}"
+
+        return Response({"payment_url": payment_url})
 # -----------------------
 # 5. NotificationViewSet
 # Hiển thị thông báo của người dùng
@@ -655,3 +705,39 @@ class FirebaseLoginViewSet(viewsets.ModelViewSet):
                 "error": "Internal Server Error",
                 "detail": str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@csrf_exempt
+def vnpay_ipn(request):
+    inputData = request.GET.dict()
+    vnp_SecureHash = inputData.pop("vnp_SecureHash", None)
+
+    # Kiểm tra chữ ký
+    sorted_params = sorted(inputData.items())
+    hashData = "&".join([f"{k}={v}" for k, v in sorted_params])
+    secure_hash = hmac.new(
+        settings.VNP_HASH_SECRET.encode("utf-8"),
+        hashData.encode("utf-8"),
+        hashlib.sha512
+    ).hexdigest()
+
+    if secure_hash != vnp_SecureHash:
+        return JsonResponse({"RspCode": "97", "Message": "Invalid signature"})
+
+    # Lấy booking_id từ vnp_OrderInfo
+    order_info = inputData.get("vnp_OrderInfo", "")
+    booking_id = order_info.replace("Thanh toan booking ", "").strip()
+
+    try:
+        booking = Booking.objects.get(id=booking_id)
+    except Booking.DoesNotExist:
+        return JsonResponse({"RspCode": "01", "Message": "Booking not found"})
+
+    if inputData.get("vnp_ResponseCode") == "00":
+        booking.status = "paid"
+        booking.payment_code = inputData.get("vnp_TransactionNo")
+        booking.save()
+        return JsonResponse({"RspCode": "00", "Message": "Confirm Success"})
+    else:
+        booking.status = "cancelled"
+        booking.save()
+        return JsonResponse({"RspCode": "00", "Message": "Payment failed"})

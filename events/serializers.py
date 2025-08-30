@@ -3,7 +3,7 @@ from rest_framework import serializers
 from django.db import models
 from .models import (
     User, Event, EventReview, EventReviewReply,
-    Ticket, Booking, Notification
+    Ticket, Booking, Notification, BookingDetail
 )
 import qrcode
 from io import BytesIO
@@ -168,53 +168,60 @@ class EventCreateSerializer(serializers.ModelSerializer):
         user = self.context['request'].user
         return Event.objects.create(organizer=user, **validated_data)
 
+# Serializer cho chi tiết vé
+class BookingDetailSerializer(serializers.ModelSerializer):
+    ticket_class = serializers.CharField(source="ticket.ticket_class", read_only=True)
+    price = serializers.DecimalField(source="ticket.price", read_only=True, max_digits=10, decimal_places=2)
+
+    class Meta:
+        model = BookingDetail
+        fields = ["id", "ticket", "ticket_class", "price", "quantity"]
+
 
 # -----------------------
 # 6. BookingSerializer
-# Dùng để hiển thị thông tin đặt vé của người dùng.
-# Bao gồm thông tin vé, số lượng, trạng thái và mã QR.
+# Serializer cho Booking (dùng khi đọc booking)
 # -----------------------
 class BookingSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
-    ticket = TicketSerializer(read_only=True)
+    details = BookingDetailSerializer(many=True, read_only=True)
 
     class Meta:
         model = Booking
-        fields = [
-            'id', 'user', 'ticket', 'quantity', 'status',
-            'created_at', 'expires_at', 'qr_code'
-        ]
+        fields = ["id", "user", "status", "created_at", "expires_at", "qr_code", "payment_code", "details"]
 
 
-
-class BookingCreateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Booking
-        fields = ['ticket', 'quantity']
-
-    def validate(self, data):
-        total_booked = data['ticket'].booking_set.aggregate(total=models.Sum('quantity'))['total'] or 0
-        available = data['ticket'].quantity - total_booked
-        if data['quantity'] > available:
-            raise serializers.ValidationError("Không đủ vé.")
-        return data
+# Serializer khi tạo booking
+class BookingCreateSerializer(serializers.Serializer):
+    tickets = serializers.ListField(
+        child=serializers.DictField(
+            child=serializers.IntegerField(),  # mỗi dict sẽ có ticket_id và quantity
+        )
+    )
 
     def create(self, validated_data):
-        user = self.context['request'].user
-        booking = Booking.objects.create(user=user, **validated_data)
+        user = self.context["request"].user
+        booking = Booking.objects.create(user=user)
 
-        # Tạo QR code
-        qr = qrcode.make(f"Booking ID: {booking.id} - User: {user.username}")
-        buffer = BytesIO()
-        qr.save(buffer, format="PNG")
-        buffer.seek(0)
+        for item in validated_data["tickets"]:
+            ticket_id = item.get("ticket_id")
+            qty = item.get("quantity", 1)
+            try:
+                ticket = Ticket.objects.get(id=ticket_id)
+            except Ticket.DoesNotExist:
+                raise serializers.ValidationError(f"Ticket {ticket_id} không tồn tại")
 
-        # Upload lên Cloudinary
-        result = upload(buffer, folder="qr_codes")
-        booking.qr_code = result['secure_url']
-        booking.save()
+            if ticket.quantity < qty:
+                raise serializers.ValidationError(f"Không đủ vé cho loại {ticket.ticket_class}")
+
+            # Trừ số lượng vé còn lại
+            ticket.quantity -= qty
+            ticket.save()
+
+            # Tạo booking detail
+            BookingDetail.objects.create(booking=booking, ticket=ticket, quantity=qty)
 
         return booking
+
 
 # -----------------------
 # 7. NotificationSerializer

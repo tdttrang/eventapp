@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     UserViewSet, EventViewSet, TicketViewSet, AdminStatsViewSet,
     BookingViewSet, NotificationViewSet, OrganizerViewSet,
-    FirebaseLoginViewSet,
+    FirebaseLoginViewSet, vnpay_ipn
 )
 from rest_framework import permissions
 from drf_yasg.views import get_schema_view
@@ -26,5 +26,8 @@ urlpatterns = [
     path('bookings/<int:pk>/momo-init/', BookingViewSet.as_view({'post': 'momo_init'}), name='booking-momo-init'),
     path('bookings/<int:pk>/momo-callback/', BookingViewSet.as_view({'post': 'momo_callback'}),
          name='booking-momo-callback'),
+    # endpoint vnpay
+    path("api/vnpay_ipn/", vnpay_ipn, name="vnpay_ipn"),
+
 ]
 
