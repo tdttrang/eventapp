@@ -28,8 +28,8 @@ urlpatterns = [
          name='booking-momo-callback'),
 
     # endpoint vnpay
-    path("api/vnpay_ipn/", vnpay_ipn, name="vnpay_ipn"),
-    path("api/vnpay_return/", vnpay_return, name="vnpay_return"),
+    path("vnpay_ipn/", vnpay_ipn, name="vnpay_ipn"),
+    path("vnpay_return/", vnpay_return, name="vnpay_return"),
 
 ]
 
