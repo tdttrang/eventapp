@@ -43,6 +43,8 @@ from .utils import generate_qr_code
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from collections import OrderedDict
+from .vnpay import vnpay
+
 # -----------------------
 # 1. UserViewSet
 # Chỉ admin mới được xem danh sách người dùng
@@ -498,42 +500,29 @@ class BookingViewSet(viewsets.ModelViewSet):
         if booking.status != "pending":
             return Response({"detail": "Booking không ở trạng thái pending"}, status=400)
 
-        # Tính tổng tiền từ các chi tiết vé
         total_amount = sum([d.ticket.price * d.quantity for d in booking.details.all()])
-
-        # Tạo mã giao dịch riêng (mỗi booking 1 order_id)
         order_id = f"{booking.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
 
-        # Các tham số gửi qua VNPay
-        vnp_Params = {
-            "vnp_Version": "2.1.0",
-            "vnp_Command": "pay",
-            "vnp_TmnCode": settings.VNP_TMN_CODE,
-            "vnp_Amount": int(total_amount) * 100,  # VNPay yêu cầu nhân 100
-            "vnp_CurrCode": "VND",
-            "vnp_TxnRef": order_id,
-            "vnp_OrderInfo": f"Thanh toan booking {booking.id}",
-            "vnp_OrderType": "other",
-            "vnp_Locale": "vn",
-            "vnp_ReturnUrl": settings.VNP_RETURN_URL,
-            "vnp_IpAddr": request.META.get("REMOTE_ADDR"),
-            "vnp_CreateDate": timezone.now().strftime("%Y%m%d%H%M%S"),
-        }
+        vnp = vnpay()
+        vnp.requestData['vnp_Version'] = '2.1.0'
+        vnp.requestData['vnp_Command'] = 'pay'
+        vnp.requestData['vnp_TmnCode'] = settings.VNP_TMN_CODE
+        vnp.requestData['vnp_Amount'] = int(total_amount) * 100
+        vnp.requestData['vnp_CurrCode'] = 'VND'
+        vnp.requestData['vnp_TxnRef'] = order_id
+        vnp.requestData['vnp_OrderInfo'] = f"Thanh toan booking {booking.id}"
+        vnp.requestData['vnp_OrderType'] = 'other'
+        vnp.requestData['vnp_Locale'] = 'vn'
+        vnp.requestData['vnp_ReturnUrl'] = settings.VNP_RETURN_URL
+        vnp.requestData['vnp_IpAddr'] = request.META.get("REMOTE_ADDR")
+        vnp.requestData['vnp_CreateDate'] = timezone.now().strftime("%Y%m%d%H%M%S")
 
-        # Sắp xếp tham số theo alphabet
-        sorted_params = sorted(vnp_Params.items())
-        hashdata = "&".join([f"{k}={v}" for k, v in sorted_params])
-
-        # Tạo chữ ký SHA512 (theo tài liệu VNPay: secret + hashdata)
-        secure_hash = hashlib.sha512((settings.VNP_HASH_SECRET + hashdata).encode("utf-8")).hexdigest()
-
-        # Encode query string (dùng quote để encode space thành %20 chứ không phải +)
-        query_string = urllib.parse.urlencode(sorted_params, quote_via=urllib.parse.quote)
-
-        # Tạo URL thanh toán
-        payment_url = f"{settings.VNP_URL}?{query_string}&vnp_SecureHash={secure_hash}"
+        # ✅ dùng helper để build URL
+        payment_url = vnp.get_payment_url(settings.VNP_URL, settings.VNP_HASH_SECRET)
 
         return Response({"payment_url": payment_url})
+
+
 # -----------------------
 # 5. NotificationViewSet
 # Hiển thị thông báo của người dùng
@@ -709,19 +698,13 @@ class FirebaseLoginViewSet(viewsets.ModelViewSet):
 
 @csrf_exempt
 def vnpay_ipn(request):
-    # Lấy toàn bộ dữ liệu query string từ VNPay
     inputData = request.GET.dict()
-    vnp_SecureHash = inputData.pop("vnp_SecureHash", None)  # lấy hash ra để kiểm tra
 
-    # Sắp xếp tham số theo alphabet
-    ordered_data = OrderedDict(sorted(inputData.items()))
-    hashData = "&".join([f"{k}={v}" for k, v in ordered_data.items()])
+    vnp = vnpay()
+    vnp.responseData = inputData
 
-    # Tạo lại chữ ký SHA512
-    secure_hash = hashlib.sha512((settings.VNP_HASH_SECRET + hashData).encode("utf-8")).hexdigest()
-
-    # So sánh chữ ký
-    if secure_hash != vnp_SecureHash:
+    # ✅ validate chữ ký bằng helper
+    if not vnp.validate_response(settings.VNP_HASH_SECRET):
         return JsonResponse({"RspCode": "97", "Message": "Invalid signature"})
 
     # Lấy booking_id từ OrderInfo
@@ -733,15 +716,13 @@ def vnpay_ipn(request):
     except Booking.DoesNotExist:
         return JsonResponse({"RspCode": "01", "Message": "Booking not found"})
 
-    # Kiểm tra mã phản hồi từ VNPay
     if inputData.get("vnp_ResponseCode") == "00":
-        # Thanh toán thành công
         booking.status = "paid"
         booking.payment_code = inputData.get("vnp_TransactionNo")
         booking.save()
         return JsonResponse({"RspCode": "00", "Message": "Confirm Success"})
     else:
-        # Thanh toán thất bại
         booking.status = "cancelled"
         booking.save()
         return JsonResponse({"RspCode": "00", "Message": "Payment failed"})
+
