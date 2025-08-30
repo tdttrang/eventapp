@@ -42,7 +42,7 @@ from django.conf import settings
 from .utils import generate_qr_code
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
-
+from collections import OrderedDict
 # -----------------------
 # 1. UserViewSet
 # Chỉ admin mới được xem danh sách người dùng
@@ -710,6 +710,22 @@ class FirebaseLoginViewSet(viewsets.ModelViewSet):
 def vnpay_ipn(request):
     inputData = request.GET.dict()
     vnp_SecureHash = inputData.pop("vnp_SecureHash", None)
+
+    # Sắp xếp tham số theo thứ tự alphabet
+    ordered_data = OrderedDict(sorted(inputData.items()))
+
+    # Tạo chuỗi hashData
+    hashData = "&".join([f"{k}={v}" for k, v in ordered_data.items()])
+
+    # Tạo chữ ký
+    secure_hash = hmac.new(
+        bytes(settings.VNP_HASH_SECRET, "utf-8"),
+        bytes(hashData, "utf-8"),
+        hashlib.sha512
+    ).hexdigest()
+
+    if secure_hash != vnp_SecureHash:
+        return JsonResponse({"RspCode": "97", "Message": "Invalid signature"})
 
     # Kiểm tra chữ ký
     sorted_params = sorted(inputData.items())
