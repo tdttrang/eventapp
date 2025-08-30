@@ -6,28 +6,23 @@ def run():
     from django.contrib.auth import get_user_model
     from events.models import Event, Ticket
 
-    # Khởi tạo Django
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'eventapp_project.settings')
     django.setup()
 
     User = get_user_model()
 
-    # 1) Tạo tài khoản admin nếu chưa có
-    admin_username = "admin"
-    admin_email = "admin@example.com"
-    admin_password = "123456"  # Có thể dùng biến môi trường để bảo mật hơn
-
-    if not User.objects.filter(username=admin_username).exists():
+    # Tạo admin nếu chưa có
+    if not User.objects.filter(username="admin").exists():
         User.objects.create_superuser(
-            username=admin_username,
-            email=admin_email,
-            password=admin_password
+            username="admin",
+            email="admin@example.com",
+            password="123456"
         )
-        print(f"✅ Đã tạo tài khoản admin: {admin_username}")
+        print("✅ Đã tạo tài khoản admin")
     else:
-        print(f"⚠️ Tài khoản admin '{admin_username}' đã tồn tại")
+        print("⚠️ Admin đã tồn tại")
 
-    # 2) Tạo (hoặc lấy) organizer dùng để gán cho tất cả sự kiện
+    # Tạo organizer nếu chưa có
     organizer, created = User.objects.get_or_create(
         username="organizer_demo",
         defaults={
@@ -48,8 +43,7 @@ def run():
     else:
         print("⚠️ organizer_demo đã tồn tại")
 
-
-    # 2) Danh sách 10 sự kiện mẫu (ngày đều ở tương lai)
+    # Danh sách sự kiện mẫu
     events_data = [
         {
             "name": "Hội Chợ Ẩm Thực Quốc Tế",
@@ -165,37 +159,41 @@ def run():
 
     # 3) Upsert 10 sự kiện (update_or_create để idempotent)
     for data in events_data:
-        event, created = Event.objects.update_or_create(
+        existing_event = Event.objects.filter(name=data["name"]).first()
+
+        if existing_event:
+            print(f"⚠️ Sự kiện '{data['name']}' đã tồn tại, giữ nguyên dữ liệu hiện tại.")
+            continue
+
+        event = Event.objects.create(
             name=data["name"],
-            defaults={
-                "description": data["description"],
-                "date": data["date"],
-                "location": data["location"],
-                "capacity": data["capacity"],
-                "organizer": organizer,
-                "media": data["media"],
-                "category": data["category"],
-                "ticket_price_regular": data["ticket_price_regular"],
-                "ticket_price_vip": data["ticket_price_vip"],
-            }
+            description=data["description"],
+            date=data["date"],
+            location=data["location"],
+            capacity=data["capacity"],
+            organizer=organizer,
+            media=data["media"],
+            category=data["category"],
+            ticket_price_regular=data["ticket_price_regular"],
+            ticket_price_vip=data["ticket_price_vip"],
         )
-        # Tạo vé thường (70% capacity)
-        Ticket.objects.update_or_create(
+
+        Ticket.objects.get_or_create(
             event=event,
             ticket_class="normal",
             defaults={
                 "price": data["ticket_price_regular"],
-                "quantity": int(event.capacity * 0.7),  # 70% capacity
+                "quantity": int(event.capacity * 0.7),
             }
         )
-        # Tạo vé VIP (30% capacity)
-        Ticket.objects.update_or_create(
+
+        Ticket.objects.get_or_create(
             event=event,
             ticket_class="VIP",
             defaults={
                 "price": data["ticket_price_vip"],
-                "quantity": int(event.capacity * 0.3),  # 30% capacity
+                "quantity": int(event.capacity * 0.3),
             }
         )
 
-    print("✅ Đã seed 10 sự kiện và 20 vé (thường + VIP) với số lượng thực tế.")
+    print("✅ Đã seed xong dữ liệu mẫu mà không ghi đè dữ liệu hiện tại.")
