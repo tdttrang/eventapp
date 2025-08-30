@@ -112,7 +112,11 @@ class TicketSerializer(serializers.ModelSerializer):
         fields = ['id', 'event', 'price', 'quantity', 'ticket_class', 'available_quantity' ]
 
     def get_available_quantity(self, obj):
-        total_booked = obj.booking_set.aggregate(total=models.Sum('quantity'))['total'] or 0
+        # Lấy tổng quantity của tất cả BookingDetail liên quan tới ticket này
+        from .models import BookingDetail
+        total_booked = BookingDetail.objects.filter(ticket=obj).aggregate(
+            total=models.Sum('quantity')
+        )['total'] or 0
         return obj.quantity - total_booked
 
 # -----------------------
