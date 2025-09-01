@@ -1,4 +1,3 @@
-from django.shortcuts import render
 from rest_framework.viewsets import ReadOnlyModelViewSet
 from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
@@ -6,14 +5,12 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
 from .utils import send_booking_email_brevo, create_notification
-from django.shortcuts import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import IsAdminUser, AllowAny
 from . import serializers
-import firebase_admin
-from firebase_admin import auth as firebase_auth, credentials, initialize_app, _apps, auth
+from firebase_admin import credentials, initialize_app, _apps, auth
 from datetime import timedelta
 from oauth2_provider.models import AccessToken, Application
 from oauthlib.common import generate_token
@@ -24,7 +21,7 @@ from django.db.models.functions import TruncMonth, TruncQuarter
 from django.db.models import Count, Sum
 from .models import (
     User, Event, EventReview, EventReviewReply,
-    Ticket, Booking, Notification
+    Ticket, Booking, Notification, BookingDetail
 )
 from .serializers import (
     UserSerializer, EventSerializer, EventReviewSerializer,
@@ -34,17 +31,15 @@ from .serializers import (
 )
 from .permissions import IsApprovedOrganizer, IsOwner, IsAdmin
 import traceback
-import urllib.parse, hmac, hashlib
-import json
-import uuid
+import hmac, hashlib
 import requests
 from django.conf import settings
 from .utils import generate_qr_code
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
-from collections import OrderedDict
 from .vnpay import vnpay
 from django.http import HttpResponse
+from django.db.models import F, ExpressionWrapper, DecimalField
 
 
 # -----------------------
@@ -152,14 +147,17 @@ class EventViewSet(viewsets.ModelViewSet):
         # Lấy sự kiện theo ID từ URL
         event = self.get_object()
 
-        # Lọc các booking đã thanh toán cho sự kiện này
-        bookings = Booking.objects.filter(ticket__event=event, status='paid')
+        # Tính từ BookingDetail thay vì Booking
+        details = BookingDetail.objects.filter(
+            ticket__event=event,
+            booking__status='paid'
+        )
 
         # Đếm số lượng vé đã bán
-        total_tickets = bookings.count()
+        total_tickets = sum([d.quantity for d in details])
 
         # Tính tổng doanh thu từ các vé đã bán
-        total_revenue = sum([b.ticket.price for b in bookings])
+        total_revenue = sum([d.ticket.price * d.quantity for d in details])
 
         # Lấy tất cả đánh giá của sự kiện
         reviews = event.reviews.all()
@@ -173,30 +171,50 @@ class EventViewSet(viewsets.ModelViewSet):
             'reviews': EventReviewSerializer(reviews, many=True).data
         }, status=status.HTTP_200_OK)
 
-    @action(detail=False, methods=['get'], url_path='dashboard-stats', permission_classes=[IsAdmin | IsApprovedOrganizer])
+    @action(detail=False, methods=['get'], url_path='dashboard-stats',
+            permission_classes=[IsAdmin | IsApprovedOrganizer])
     def dashboard_stats(self, request):
         user = request.user
 
         events = self.get_queryset()
+        details = BookingDetail.objects.all()
         tickets = Ticket.objects.all()
         reviews = EventReview.objects.all()
 
         if user.role == "organizer":
             events = events.filter(organizer=user)
+            details = details.filter(ticket__event__organizer=user)
             tickets = tickets.filter(event__organizer=user)
             reviews = reviews.filter(event__organizer=user)
 
+        # Fix monthly_stats: Wrap expression price * quantity
+        revenue_expression = ExpressionWrapper(
+            F('ticket__price') * F('quantity'),
+            output_field=DecimalField(max_digits=12, decimal_places=2)  # Adjust max_digits nếu revenue lớn
+        )
         monthly_stats = (
-            tickets.annotate(month=TruncMonth('created_at'))
+            details.annotate(month=TruncMonth('booking__created_at'))
             .values('month')
-            .annotate(revenue=Sum('price'), tickets=Count('id'))
+            .annotate(
+                revenue=Sum(revenue_expression),
+                tickets=Sum('quantity')
+            )
             .order_by('month')
         )
+        # Fix total_revenue: Dùng aggregate thay vì sum list (tối ưu, không fetch all)
+        total_revenue_agg = details.aggregate(
+            total=Sum(revenue_expression, filter=F('booking__status') == 'paid')
+        )['total'] or 0
+
+        # Total_tickets cũng aggregate cho nhất quán
+        total_tickets_agg = details.aggregate(
+            total=Sum('quantity', filter=F('booking__status') == 'paid')
+        )['total'] or 0
 
         return Response({
             "total_events": events.count(),
-            "total_tickets": tickets.count(),
-            "total_revenue": tickets.aggregate(Sum('price'))['price__sum'] or 0,
+            "total_tickets": total_tickets_agg,
+            "total_revenue": total_revenue_agg,
             "total_reviews": reviews.count(),
             "monthly_stats": monthly_stats,
         })
@@ -228,14 +246,22 @@ class TicketViewSet(viewsets.ModelViewSet):
         mode = request.query_params.get('mode', 'month')
         trunc_func = TruncMonth if mode == 'month' else TruncQuarter
 
-        tickets = self.get_queryset()
+        details = BookingDetail.objects.all()
         if user.role == "organizer":
-            tickets = tickets.filter(event__organizer=user)
+            details = details.filter(ticket__event__organizer=user)
 
+        # Fix stats: Wrap expression
+        revenue_expression = ExpressionWrapper(
+            F('ticket__price') * F('quantity'),
+            output_field=DecimalField(max_digits=12, decimal_places=2)
+        )
         stats = (
-            tickets.annotate(period=trunc_func('created_at'))
+            details.annotate(period=trunc_func('booking__created_at'))
             .values('period')
-            .annotate(total_revenue=Sum('price'), tickets_sold=Count('id'))
+            .annotate(
+                total_revenue=Sum(revenue_expression),
+                tickets_sold=Sum('quantity')
+            )
             .order_by('period')
         )
         return Response(stats)
@@ -253,18 +279,18 @@ class BookingViewSet(viewsets.ModelViewSet):
         # Chỉ hiển thị booking của người dùng hiện tại
         return Booking.objects.filter(user=self.request.user)
 
-    def perform_create(self, serializer):
-        # Tạo booking và gán user
-        booking = serializer.save(user=self.request.user)
-
-        # Gửi thông báo khi đặt vé thành công
-        create_notification(
-            user=self.request.user,
-            notification_type="booking",
-            subject="Đặt vé thành công",
-            message=f"Bạn đã đặt vé cho sự kiện '{booking.ticket.event.name}'. Vui lòng thanh toán trong 10 phút.",
-            related_object_id=booking.id
-        )
+    # def perform_create(self, serializer):
+    #     # Tạo booking và gán user
+    #     booking = serializer.save(user=self.request.user)
+    #
+    #     # Gửi thông báo khi đặt vé thành công
+    #     create_notification(
+    #         user=self.request.user,
+    #         notification_type="booking",
+    #         subject="Đặt vé thành công",
+    #         message=f"Bạn đã đặt vé cho sự kiện '{booking.ticket.event.name}'. Vui lòng thanh toán trong 10 phút.",
+    #         related_object_id=booking.id
+    #     )
 
     def get_serializer_class(self):
         if self.action in ["create", "book"]:
@@ -277,35 +303,38 @@ class BookingViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         booking = serializer.save()
+        # Gửi notification (di chuyển từ perform_create, lấy event từ details)
+        if booking.details.exists():
+            event_name = booking.details.first().ticket.event.name
+            create_notification(
+                user=request.user,
+                notification_type="booking",
+                subject="Đặt vé thành công",
+                message=f"Bạn đã đặt vé cho sự kiện '{event_name}'. Vui lòng thanh toán trong 10 phút.",
+                related_object_id=booking.id
+            )
         return Response(BookingSerializer(booking).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def book(self, request):
-        try:
-            ticket_id = request.data.get('ticket_id')
-            print(f"Ticket ID: {ticket_id}, User: {request.user}, Authenticated: {request.user.is_authenticated}")
-            ticket = get_object_or_404(Ticket, id=ticket_id)
-            if ticket.event.date <= timezone.now():
-                return Response({'detail': 'Không thể đặt vé cho sự kiện đã diễn ra.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Thống nhất với create: Wrap thành list tickets nếu chỉ 1 vé
+        ticket_id = request.data.get('ticket_id')
+        quantity = request.data.get('quantity', 1)
+        if not ticket_id:
+            return Response({'detail': 'Ticket ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            quantity = request.data.get('quantity', 1)
-            booking = Booking.objects.create(
-                user=request.user,
-                ticket=ticket,
-                quantity=quantity,
-                status='pending',  # Đổi thành pending để phù hợp với logic thanh toán MoMo
-                expires_at=timezone.now() + timedelta(minutes=10)
-            )
-            serializer = BookingSerializer(booking)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        except Exception as e:
-            print(f"Error: {str(e)}")
-            return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        data = {"tickets": [{"ticket_id": ticket_id, "quantity": quantity}]}
+        serializer = BookingCreateSerializer(data=data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        booking = serializer.save()
+        return Response(BookingSerializer(booking).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], permission_classes=[IsOwner])
     def cancel(self, request, pk=None):
         booking = self.get_object()
-        event = booking.ticket.event
+        if not booking.details.exists():
+            return Response({'detail': 'Booking không có chi tiết vé.'}, status=status.HTTP_400_BAD_REQUEST)
+        event = booking.details.first().ticket.event  # Lấy event từ details
         event_start_time = booking.ticket.event.date
         now = timezone.now()
 
@@ -329,7 +358,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         # Gửi thông báo cho organizer của sự kiện
         organizer = event.organizer
         create_notification(
-            user=organizer.user,
+            user=event.organizer,
             notification_type="booking_cancel_notice",
             subject="Người dùng hủy vé",
             message=f"Người dùng {request.user.username} đã hủy đơn hàng #{booking.id} cho sự kiện '{event.name}'.",
@@ -340,7 +369,9 @@ class BookingViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[IsApprovedOrganizer])
     def check_in(self, request, pk=None):
         booking = self.get_object()
-        event = booking.ticket.event
+        if not booking.details.exists():
+            return Response({'detail': 'Booking không có chi tiết vé.'}, status=status.HTTP_400_BAD_REQUEST)
+        event = booking.details.first().ticket.event
 
         if event.organizer != request.user:
             return Response({'detail': 'Bạn không có quyền xác nhận người tham gia cho sự kiện này.'},
@@ -353,31 +384,6 @@ class BookingViewSet(viewsets.ModelViewSet):
         booking.save()
         return Response({'detail': 'Check-in thành công.'})
 
-    # @action(detail=True, methods=['post'], permission_classes=[IsOwner])
-    # def pay(self, request, pk=None):
-    #     booking = self.get_object()
-    #
-    #     if booking.status != 'pending':
-    #         return Response({'detail': 'Chỉ có thể thanh toán đơn đang chờ.'}, status=status.HTTP_400_BAD_REQUEST)
-    #
-    #     # Giả lập thanh toán thành công
-    #     booking.status = 'paid'
-    #     booking.save()
-    #
-    #     # Gửi email xác nhận qua Brevo
-    #     try:
-    #         send_booking_email_brevo(
-    #             to_email=request.user.email,
-    #             subject=f"Xác nhận đặt vé - {booking.ticket.event.name}",
-    #             message=f"Bạn đã thanh toán thành công. Mã QR: {booking.qr_code.url}"
-    #         )
-    #     except Exception as e:
-    #         return Response({'detail': 'Thanh toán thành công, nhưng gửi email thất bại.', 'error': str(e)},
-    #                         status=status.HTTP_202_ACCEPTED)
-    #
-    #     return Response({'detail': 'Thanh toán thành công.'})
-
-    # thanh toan qua momo
     @action(detail=True, methods=['post'], permission_classes=[IsOwner])
     def momo_init(self, request, pk=None):
         booking = self.get_object()
@@ -390,8 +396,8 @@ class BookingViewSet(viewsets.ModelViewSet):
             booking.save()
             return Response({'detail': 'Đơn hàng đã hết hạn.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Tính số tiền dựa trên ticket.price và quantity
-        amount = int(booking.ticket.price * booking.quantity)
+        # Tính amount từ details
+        amount = int(sum([d.ticket.price * d.quantity for d in booking.details.all()]))
         order_id = f"MOMO-{booking.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
         order_info = f"Thanh toán vé sự kiện {booking.ticket.event.name}"
 
@@ -442,17 +448,14 @@ class BookingViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
-
     @action(detail=True, methods=['post'], permission_classes=[AllowAny], url_path='momo-callback')
     def momo_callback(self, request, pk=None):
-        booking = self.get_object()
         data = request.data
-        result_code = data.get("result_code")
-        order_id = data.get('orderId')
+        booking = self.get_object()
+        order_id = data.get("orderId")
+        result_code = data.get("resultCode")
         message = data.get("message", "")
 
-        # Kiểm tra chữ ký từ MoMo để đảm bảo an toàn
         raw_signature = (
             f"accessKey={settings.MOMO_ACCESS_KEY}&amount={data.get('amount')}&extraData={data.get('extraData')}"
             f"&message={message}&orderId={order_id}&orderInfo={data.get('orderInfo')}"
@@ -473,15 +476,16 @@ class BookingViewSet(viewsets.ModelViewSet):
         if result_code == 0:
             booking.status = 'paid'
             booking.expires_at = None
-            # Tạo QR code (giả sử dùng Cloudinary)
-            qr_data = f"Booking-{booking.id}-{booking.ticket.event.name}"
+            # Fix qr_data dùng details
+            event_name = booking.details.first().ticket.event.name if booking.details.exists() else "Sự kiện không xác định"
+            qr_data = f"Booking-{booking.id}-{event_name}"
             qr_image = generate_qr_code(qr_data)  # Hàm tạo QR code
             booking.qr_code = qr_image
             booking.save()
             try:
                 send_booking_email_brevo(
                     to_email=booking.user.email,
-                    subject=f"Xác nhận đặt vé - {booking.ticket.event.name}",
+                    subject=f"Xác nhận đặt vé - {event_name}",
                     message=f"Bạn đã thanh toán thành công qua MoMo. Mã QR: {booking.qr_code.url}"
                 )
             except Exception as e:
@@ -569,7 +573,7 @@ class EventReviewViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         user = self.request.user
         event = serializer.validated_data['event']
-        has_booking = Booking.objects.filter(user=user, ticket__event=event, status='paid').exists()
+        has_booking = Booking.objects.filter(user=user, details__ticket__event=event, status='paid').exists()
         if not has_booking:
             raise serializers.ValidationError("Bạn chưa tham gia sự kiện này.")
         serializer.save(user=user)
@@ -600,20 +604,22 @@ class AdminStatsViewSet(GenericViewSet):
 
     @action(detail=False, methods=['get'])
     def global_stats(self, request):
-        # Lấy dữ liệu booking đã thanh toán, nhóm theo tháng
-        monthly_data = Booking.objects.filter(status='paid') \
-            .annotate(month=TruncMonth('created_at')) \
-            .values('month') \
+        # Update dùng details filter paid
+        details = BookingDetail.objects.filter(booking__status='paid')
+        monthly_data = (
+            details.annotate(month=TruncMonth('booking__created_at'))
+            .values('month')
             .annotate(
-                total_participants=Count('id'),      # Số người tham gia
-                total_revenue=Sum('ticket__price')   # Tổng doanh thu
-            ) \
+                total_participants=Sum('quantity'),  # Số vé tham gia
+                total_revenue=Sum('ticket__price' * 'quantity')  # Doanh thu đúng
+            )
             .order_by('month')
+        )
 
         # Trả về thống kê toàn hệ thống
         return Response({
-            'total_events': Event.objects.count(),   # Tổng số sự kiện
-            'monthly_stats': monthly_data            # Dữ liệu theo tháng
+            'total_events': Event.objects.count(),  # Tổng số sự kiện
+            'monthly_stats': monthly_data  # Dữ liệu theo tháng
         })
 
 User = get_user_model()

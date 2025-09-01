@@ -8,6 +8,9 @@ from .models import (
 import qrcode
 from io import BytesIO
 from cloudinary.uploader import upload
+from django.db.models import Sum
+from datetime import timezone, timedelta
+
 
 
 # -----------------------
@@ -104,6 +107,7 @@ class EventReviewSerializer(serializers.ModelSerializer):
 # 4. TicketSerializer
 # Dùng để hiển thị thông tin vé của sự kiện.
 # Bao gồm loại vé, giá và số lượng còn lại.
+# TicketSerializer (fix available_quantity: lọc status)
 # -----------------------
 class TicketSerializer(serializers.ModelSerializer):
     available_quantity = serializers.SerializerMethodField()
@@ -112,12 +116,12 @@ class TicketSerializer(serializers.ModelSerializer):
         fields = ['id', 'event', 'price', 'quantity', 'ticket_class', 'available_quantity' ]
 
     def get_available_quantity(self, obj):
-        # Lấy tổng quantity của tất cả BookingDetail liên quan tới ticket này
-        from .models import BookingDetail
-        total_booked = BookingDetail.objects.filter(ticket=obj).aggregate(
-            total=models.Sum('quantity')
-        )['total'] or 0
-        return obj.quantity - total_booked
+        # Tính tổng booked từ BookingDetail, chỉ tính booking pending hoặc paid (không tính cancelled)
+        total_booked = BookingDetail.objects.filter(
+            ticket=obj,
+            booking__status__in=['pending', 'paid']
+        ).aggregate(total=Sum('quantity'))['total'] or 0
+        return obj.quantity - total_booked  # quantity gốc không thay đổi
 
 # -----------------------
 # 5. EventSerializer
@@ -194,7 +198,7 @@ class BookingSerializer(serializers.ModelSerializer):
         fields = ["id", "user", "status", "created_at", "expires_at", "qr_code", "payment_code", "details"]
 
 
-# Serializer khi tạo booking
+# Serializer khi tạo booking (bỏ trừ trực tiếp, thêm validate tồn kho)
 class BookingCreateSerializer(serializers.Serializer):
     tickets = serializers.ListField(
         child=serializers.DictField(
@@ -202,26 +206,45 @@ class BookingCreateSerializer(serializers.Serializer):
         )
     )
 
-    def create(self, validated_data):
-        user = self.context["request"].user
-        booking = Booking.objects.create(user=user)
-
-        for item in validated_data["tickets"]:
+    def validate(self, data):
+        for item in data["tickets"]:
             ticket_id = item.get("ticket_id")
             qty = item.get("quantity", 1)
+            if qty <= 0:
+                raise serializers.ValidationError("Số lượng phải lớn hơn 0")
             try:
                 ticket = Ticket.objects.get(id=ticket_id)
             except Ticket.DoesNotExist:
                 raise serializers.ValidationError(f"Ticket {ticket_id} không tồn tại")
 
-            if ticket.quantity < qty:
-                raise serializers.ValidationError(f"Không đủ vé cho loại {ticket.ticket_class}")
+            # Tính available động (tương tự TicketSerializer)
+            total_booked = BookingDetail.objects.filter(
+                ticket=ticket,
+                booking__status__in=['pending', 'paid']
+            ).aggregate(total=Sum('quantity'))['total'] or 0
+            available = ticket.quantity - total_booked
 
-            # Trừ số lượng vé còn lại
-            ticket.quantity -= qty
-            ticket.save()
+            if available < qty:
+                raise serializers.ValidationError(f"Không đủ vé cho loại {ticket.ticket_class}. Còn lại: {available}")
 
-            # Tạo booking detail
+            # Kiểm tra event chưa diễn ra (tương tự code cũ)
+            if ticket.event.date <= timezone.now():
+                raise serializers.ValidationError("Không thể đặt vé cho sự kiện đã diễn ra.")
+
+        return data
+
+    def create(self, validated_data):
+        user = self.context["request"].user
+        booking = Booking.objects.create(
+            user=user,
+            status='pending',
+            expires_at=timezone.now() + timedelta(minutes=10)
+        )
+        for item in validated_data["tickets"]:
+            ticket_id = item.get("ticket_id")
+            qty = item.get("quantity", 1)
+            ticket = Ticket.objects.get(id=ticket_id)
+            # KHÔNG trừ ticket.quantity nữa! Available sẽ tự cập nhật từ query
             BookingDetail.objects.create(booking=booking, ticket=ticket, quantity=qty)
 
         return booking
