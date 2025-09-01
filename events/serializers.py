@@ -9,7 +9,8 @@ import qrcode
 from io import BytesIO
 from cloudinary.uploader import upload
 from django.db.models import Sum
-from datetime import timezone, timedelta
+from django.utils import timezone
+from datetime import timedelta
 
 
 
