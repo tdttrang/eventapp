@@ -509,15 +509,11 @@ class BookingViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Booking không ở trạng thái pending"}, status=400)
 
         total_amount = sum([d.ticket.price * d.quantity for d in booking.details.all()])
-        order_id = f"{booking.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}"
-
-        vn_tz = pytz.timezone("Asia/Ho_Chi_Minh")
-        now = timezone.now().astimezone(vn_tz)
+        order_id = f"{booking.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
 
         vnp = vnpay()
         vnp.requestData['vnp_Version'] = '2.1.0'
         vnp.requestData['vnp_Command'] = 'pay'
-        vnp.requestData['vnp_BankCode'] = 'NCB'  # bank test mặc định do VNPAY cung cấp
         vnp.requestData['vnp_TmnCode'] = settings.VNP_TMN_CODE
         vnp.requestData['vnp_Amount'] = int(total_amount) * 100
         vnp.requestData['vnp_CurrCode'] = 'VND'
@@ -526,12 +522,8 @@ class BookingViewSet(viewsets.ModelViewSet):
         vnp.requestData['vnp_OrderType'] = 'other'
         vnp.requestData['vnp_Locale'] = 'vn'
         vnp.requestData['vnp_ReturnUrl'] = settings.VNP_RETURN_URL
-#        vnp.requestData['vnp_CreateDate'] = timezone.now().strftime("%Y%m%d%H%M%S")
-        vnp.requestData['vnp_CreateDate'] = now.strftime("%Y%m%d%H%M%S")
-        vnp.requestData['vnp_ExpireDate'] = (now + timedelta(minutes=15)).strftime("%Y%m%d%H%M%S")
-        vnp.requestData['vnp_TxnRef'] = order_id
-
-
+        vnp.requestData['vnp_CreateDate'] = timezone.now().strftime("%Y%m%d%H%M%S")
+        vnp.requestData['vnp_ExpireDate'] = (timezone.now() + timedelta(minutes=15)).strftime("%Y%m%d%H%M%S")
         ip_addr = (
                 request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0]
                 or request.META.get("REMOTE_ADDR", "")
@@ -539,8 +531,13 @@ class BookingViewSet(viewsets.ModelViewSet):
         )
         vnp.requestData['vnp_IpAddr'] = ip_addr
 
-        # ✅ dùng helper để build URL
+        # In log chi tiết
+        print(">>> VNPAY requestData:", vnp.requestData)
+
+        # Build URL
         payment_url = vnp.get_payment_url(settings.VNP_URL, settings.VNP_HASH_SECRET)
+
+        # In log URL
         print(">>> Payment URL built:", payment_url)
 
         return Response({"payment_url": payment_url})
