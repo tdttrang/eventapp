@@ -542,6 +542,15 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         return Response({"payment_url": payment_url})
 
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def fake_payment(self, request, pk=None):
+        booking = self.get_object()
+        booking.status = "paid"
+        booking.qr_code = generate_qr_code(f"Booking:{booking.id}")
+        booking.save()
+        send_booking_email_brevo(booking.user.email, "Xac nhan dat ve", "Cam on ban da dat ve...")
+        return Response({"detail": "Fake payment success"})
+
 
 # -----------------------
 # 5. NotificationViewSet
