@@ -20,11 +20,12 @@ from datetime import timedelta
 # Bao gồm thông tin cơ bản như username, email, role, avatar và trạng thái duyệt.
 # -----------------------
 class UserSerializer(serializers.ModelSerializer):
-    avatar = serializers.SerializerMethodField()
+    avatar = serializers.ImageField(read_only=True)  # chỉ đọc, trả về URL ảnh
 
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'role', 'avatar', 'is_approved']
+        read_only_fields = ['id', 'role', 'is_approved']
 
     def get_avatar(self, obj):
         return str(obj.avatar) if obj.avatar else None

@@ -43,6 +43,7 @@ from .vnpay import vnpay
 from django.http import HttpResponse
 from django.db.models import F, ExpressionWrapper, DecimalField
 from django_filters import rest_framework as filters
+from rest_framework.parsers import MultiPartParser, FormParser
 
 # -----------------------
 # 1. UserViewSet
@@ -75,6 +76,41 @@ class UserViewSet(viewsets.ModelViewSet):
         user = request.user
         serializer = self.get_serializer(user)
         return Response(serializer.data)
+
+    # endpoint chỉnh sửa thông tin cá nhân
+    @action(detail=False, methods=['patch'], permission_classes=[IsAuthenticated], url_path='me')
+    def update_current_user(self, request):
+        serializer = self.get_serializer(
+            request.user,
+            data=request.data,
+            partial=True,
+            context={'request': request}
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    # endpoint upload avtar
+    @action(
+        detail=False, methods=['post'],
+        permission_classes=[IsAuthenticated],
+        url_path='me/avatar',
+        parser_classes=[MultiPartParser, FormParser]
+    )
+    def upload_avatar(self, request):
+        user = request.user
+        avatar_file = request.FILES.get('avatar')
+        if not avatar_file:
+            return Response({'error': 'No file uploaded'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Gán file mới, CloudinaryStorage sẽ tự upload
+        user.avatar = avatar_file
+        user.save()
+
+        # Trả về full thông tin user, avatar là URL Cloudinary
+        serializer = self.get_serializer(user, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class OrganizerViewSet(viewsets.GenericViewSet):
@@ -760,6 +796,9 @@ class FirebaseLoginViewSet(viewsets.ModelViewSet):
 def vnpay_ipn(request):
     inputData = request.GET.dict()
 
+    # ✅ log toàn bộ tham số VNPAY gửi về để debug
+    print(">>> [VNPAY IPN] params:", inputData)
+
     vnp = vnpay()
     vnp.responseData = inputData
 
@@ -777,6 +816,8 @@ def vnpay_ipn(request):
         return JsonResponse({"RspCode": "01", "Message": "Booking not found"})
 
     response_code = inputData.get("vnp_ResponseCode")
+    print(f">>> [VNPAY] Booking {booking_id} - ResponseCode: {response_code}")
+
 
     if response_code == "00":
         # Kiểm tra nếu đã paid rồi (tránh duplicate update)
@@ -805,6 +846,10 @@ def vnpay_ipn(request):
 def vnpay_return(request):
     inputData = request.GET.dict()
 
+    # ✅ log toàn bộ tham số VNPAY gửi về trang return
+    print(">>> [VNPAY RETURN] params:", inputData)
+
+
     vnp = vnpay()
     vnp.responseData = inputData
 
@@ -820,7 +865,9 @@ def vnpay_return(request):
     except Booking.DoesNotExist:
         return HttpResponse("Booking không tồn tại")
 
+
     response_code = inputData.get("vnp_ResponseCode")
+    print(f">>> [VNPAY] Booking {booking_id} - ResponseCode: {response_code}")
 
     if response_code == "00":
         if booking.status != "paid":
