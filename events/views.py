@@ -13,7 +13,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import IsAdminUser, AllowAny
 from . import serializers
 from firebase_admin import credentials, initialize_app, _apps, auth
-from datetime import timedelta
+from datetime import datetime, timedelta
 from oauth2_provider.models import AccessToken, Application
 from oauthlib.common import generate_token
 from django.contrib.auth import get_user_model
@@ -44,7 +44,6 @@ from django.http import HttpResponse
 from django.db.models import F, ExpressionWrapper, DecimalField
 from django_filters import rest_framework as filters
 
-tz = pytz.timezone('Asia/Ho_Chi_Minh')
 # -----------------------
 # 1. UserViewSet
 # Chỉ admin mới được xem danh sách người dùng
@@ -543,8 +542,10 @@ class BookingViewSet(viewsets.ModelViewSet):
         vnp.requestData['vnp_OrderType'] = 'other'
         vnp.requestData['vnp_Locale'] = 'vn'
         vnp.requestData['vnp_ReturnUrl'] = settings.VNP_RETURN_URL
-        vnp.requestData['vnp_CreateDate'] = timezone.now().strftime("%Y%m%d%H%M%S")
-        vnp.requestData['vnp_ExpireDate'] = (timezone.now() + timedelta(minutes=15)).strftime("%Y%m%d%H%M%S")
+        tz = pytz.timezone('Asia/Ho_Chi_Minh')
+        current_time = datetime.now(tz)
+        vnp.requestData['vnp_CreateDate'] = current_time.strftime("%Y%m%d%H%M%S")
+        vnp.requestData['vnp_ExpireDate'] = (current_time + timedelta(minutes=15)).strftime("%Y%m%d%H%M%S")
         ip_addr = (
                 request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0]
                 or request.META.get("REMOTE_ADDR", "")
