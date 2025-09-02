@@ -769,12 +769,28 @@ def vnpay_ipn(request):
     except Booking.DoesNotExist:
         return JsonResponse({"RspCode": "01", "Message": "Booking not found"})
 
-    if inputData.get("vnp_ResponseCode") == "00":
+    response_code = inputData.get("vnp_ResponseCode")
+
+    if response_code == "00":
+        # Kiểm tra nếu đã paid rồi (tránh duplicate update)
+        if booking.status == "paid":
+            return JsonResponse({"RspCode": "02", "Message": "Booking already paid"})
+
+        # Update status, generate QR, save payment_code
         booking.status = "paid"
         booking.payment_code = inputData.get("vnp_TransactionNo")
+        booking.qr_code = generate_qr_code(f"Booking:{booking.id}")  # Generate QR
         booking.save()
+
+        # Gửi email xác nhận (copy từ fake_payment)
+        send_booking_email_brevo(
+            booking.user.email,
+            "Xac nhan dat ve",
+            "Cam on ban da dat ve..."  # Thay bằng nội dung email đầy đủ nếu cần
+        )
         return JsonResponse({"RspCode": "00", "Message": "Confirm Success"})
     else:
+        # neu failed, set cancelled
         booking.status = "cancelled"
         booking.save()
         return JsonResponse({"RspCode": "00", "Message": "Payment failed"})
