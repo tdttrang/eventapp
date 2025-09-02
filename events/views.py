@@ -4,6 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
+import pytz
 from .utils import send_booking_email_brevo, create_notification
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
@@ -509,6 +510,9 @@ class BookingViewSet(viewsets.ModelViewSet):
         total_amount = sum([d.ticket.price * d.quantity for d in booking.details.all()])
         order_id = f"{booking.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
 
+        vn_tz = pytz.timezone("Asia/Ho_Chi_Minh")
+        now = timezone.now().astimezone(vn_tz)
+
         vnp = vnpay()
         vnp.requestData['vnp_Version'] = '2.1.0'
         vnp.requestData['vnp_Command'] = 'pay'
@@ -521,8 +525,8 @@ class BookingViewSet(viewsets.ModelViewSet):
         vnp.requestData['vnp_Locale'] = 'vn'
         vnp.requestData['vnp_ReturnUrl'] = settings.VNP_RETURN_URL
 #        vnp.requestData['vnp_CreateDate'] = timezone.now().strftime("%Y%m%d%H%M%S")
-        vnp.requestData['vnp_CreateDate'] = timezone.now().strftime("%Y%m%d%H%M%S")
-        vnp.requestData['vnp_ExpireDate'] = (timezone.now() + timedelta(minutes=15)).strftime("%Y%m%d%H%M%S")
+        vnp.requestData['vnp_CreateDate'] = now.strftime("%Y%m%d%H%M%S")
+        vnp.requestData['vnp_ExpireDate'] = (now + timedelta(minutes=15)).strftime("%Y%m%d%H%M%S")
 
         ip_addr = (
                 request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0]
