@@ -42,8 +42,9 @@ from django.http import JsonResponse
 from .vnpay import vnpay
 from django.http import HttpResponse
 from django.db.models import F, ExpressionWrapper, DecimalField
+from django_filters import rest_framework as filters
 
-
+tz = pytz.timezone('Asia/Ho_Chi_Minh')
 # -----------------------
 # 1. UserViewSet
 # Chỉ admin mới được xem danh sách người dùng
@@ -114,6 +115,15 @@ class OrganizerViewSet(viewsets.GenericViewSet):
         except User.DoesNotExist:
             return Response({'detail': 'Không tìm thấy người dùng.'}, status=status.HTTP_404_NOT_FOUND)
 
+
+class EventFilter(filters.FilterSet):
+    date__gte = filters.DateFilter(field_name="date", lookup_expr='gte')  # Từ ngày
+    date__lte = filters.DateFilter(field_name="date", lookup_expr='lte')  # Đến ngày
+    location = filters.CharFilter(field_name="location", lookup_expr='icontains')  # Partial match (không case-sensitive)
+
+    class Meta:
+        model = Event
+        fields = ['category', 'location', 'date', 'date__gte', 'date__lte']
 # -----------------------
 # 2. EventViewSet
 # Organizer có thể tạo/sửa/xóa sự kiện, người dùng có thể xem
@@ -221,6 +231,17 @@ class EventViewSet(viewsets.ModelViewSet):
             "monthly_stats": monthly_stats,
         })
 
+    # api: events/locations
+    @action(detail=False, methods=['get'], url_path='locations')
+    def get_locations(self, request):
+        locations = Event.objects.values_list('location', flat=True).distinct()
+        return Response(locations)
+
+    # api: events/categories
+    @action(detail=False, methods=['get'], url_path='categories')
+    def get_categories(self, request):
+        categories = Event.objects.values_list('category', flat=True).distinct()
+        return Response(categories)
 # -----------------------
 # 3. TicketViewSet
 # Quản lý vé cho từng sự kiện
