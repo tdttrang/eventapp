@@ -69,6 +69,13 @@ class UserViewSet(viewsets.ModelViewSet):
             return User.objects.all()
         return User.objects.none()
 
+    # endpoint /api/users/me/: lấy thông tin ngươif dùng hiện tại, chỉ người dùng đã đăng nhập mới truy cập được
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='me')
+    def get_current_user(self, request):
+        user = request.user
+        serializer = self.get_serializer(user)
+        return Response(serializer.data)
+
 
 class OrganizerViewSet(viewsets.GenericViewSet):
     # Chỉ lấy những user có role là 'organizer'
@@ -796,9 +803,39 @@ def vnpay_ipn(request):
         return JsonResponse({"RspCode": "00", "Message": "Payment failed"})
 
 def vnpay_return(request):
-    vnp_ResponseCode = request.GET.get("vnp_ResponseCode")
-    if vnp_ResponseCode == "00":
-        return HttpResponse("Thanh toan thanh cong!")
+    inputData = request.GET.dict()
+
+    vnp = vnpay()
+    vnp.responseData = inputData
+
+    # validate chữ ký
+    if not vnp.validate_response(settings.VNP_HASH_SECRET):
+        return HttpResponse("Chữ ký không hợp lệ")
+
+    order_info = inputData.get("vnp_OrderInfo", "")
+    booking_id = order_info.replace("Thanh toan booking ", "").strip()
+
+    try:
+        booking = Booking.objects.get(id=booking_id)
+    except Booking.DoesNotExist:
+        return HttpResponse("Booking không tồn tại")
+
+    response_code = inputData.get("vnp_ResponseCode")
+
+    if response_code == "00":
+        if booking.status != "paid":
+            booking.status = "paid"
+            booking.payment_code = inputData.get("vnp_TransactionNo")
+            booking.qr_code = generate_qr_code(f"Booking:{booking.id}")
+            booking.save()
+            send_booking_email_brevo(
+                booking.user.email,
+                "Xác nhận đặt vé",
+                "Cảm ơn bạn đã đặt vé..."
+            )
+        return HttpResponse("Thanh toán thành công!")
     else:
-        return HttpResponse("Thanh toan that bai!")
+        booking.status = "cancelled"
+        booking.save()
+        return HttpResponse("Thanh toán thất bại!")
 
