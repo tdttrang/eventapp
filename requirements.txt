@@ -25,6 +25,7 @@ django-celery-beat==2.8.1
 django-cloudinary-storage==0.3.0
 django-cors-headers==4.7.0
 django-environ==0.12.0
+django-extensions==4.1
 django-filter==25.1
 django-oauth-toolkit==3.0.1
 django-timezone-field==7.1
@@ -32,6 +33,7 @@ djangorestframework==3.16.1
 dnspython==2.7.0
 drf-yasg==1.21.10
 ecdsa==0.19.1
+eventlet==0.40.2
 fastapi==0.116.1
 firebase_admin==7.1.0
 google-api-core==2.25.1
@@ -104,4 +106,3 @@ vine==5.1.0
 watchfiles==1.1.0
 wcwidth==0.2.13
 whitenoise==6.9.0
-django_extensions
