@@ -520,11 +520,20 @@ class BookingViewSet(viewsets.ModelViewSet):
         vnp.requestData['vnp_OrderType'] = 'other'
         vnp.requestData['vnp_Locale'] = 'vn'
         vnp.requestData['vnp_ReturnUrl'] = settings.VNP_RETURN_URL
-        vnp.requestData['vnp_IpAddr'] = request.META.get("REMOTE_ADDR")
+#        vnp.requestData['vnp_CreateDate'] = timezone.now().strftime("%Y%m%d%H%M%S")
         vnp.requestData['vnp_CreateDate'] = timezone.now().strftime("%Y%m%d%H%M%S")
+        vnp.requestData['vnp_ExpireDate'] = (timezone.now() + timedelta(minutes=15)).strftime("%Y%m%d%H%M%S")
+
+        ip_addr = (
+                request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0]
+                or request.META.get("REMOTE_ADDR", "")
+                or "127.0.0.1"
+        )
+        vnp.requestData['vnp_IpAddr'] = ip_addr
 
         # ✅ dùng helper để build URL
         payment_url = vnp.get_payment_url(settings.VNP_URL, settings.VNP_HASH_SECRET)
+        print(">>> Payment URL built:", payment_url)
 
         return Response({"payment_url": payment_url})
 
