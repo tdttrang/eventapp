@@ -190,6 +190,7 @@ class EventViewSet(viewsets.ModelViewSet):
     filterset_fields = ['category', 'location', 'date']
     ordering_fields = ['date', 'average_rating', 'popularity']
     permission_classes = [IsAuthenticated]
+    ordering = ['id']
 
     def get_permissions(self):
         # Nếu là tạo, sửa, xóa thì cần organizer đã được duyệt
