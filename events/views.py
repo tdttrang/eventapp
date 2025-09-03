@@ -596,7 +596,10 @@ class BookingViewSet(viewsets.ModelViewSet):
         vnp.requestData['vnp_OrderInfo'] = f"Thanh toan booking {booking.id}"
         vnp.requestData['vnp_OrderType'] = 'other'
         vnp.requestData['vnp_Locale'] = 'vn'
+
         vnp.requestData['vnp_ReturnUrl'] = settings.VNP_RETURN_URL
+        vnp.requestData['vnp_IpnUrl'] = settings.VNP_IPN_URL
+
         tz = pytz.timezone('Asia/Ho_Chi_Minh')
         current_time = datetime.now(tz)
         vnp.requestData['vnp_CreateDate'] = current_time.strftime("%Y%m%d%H%M%S")
@@ -896,5 +899,6 @@ def vnpay_return(request):
     else:
         booking.status = "cancelled"
         booking.save()
+        print(f">>> [VNPAY RETURN] Booking {booking_id} updated to cancelled")
         return HttpResponse("Thanh toán thất bại!")
 
