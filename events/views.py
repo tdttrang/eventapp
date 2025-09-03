@@ -71,25 +71,22 @@ class UserViewSet(viewsets.ModelViewSet):
         return User.objects.none()
 
     # endpoint /api/users/me/: lấy thông tin ngươif dùng hiện tại, chỉ người dùng đã đăng nhập mới truy cập được
-    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='me')
-    def get_current_user(self, request):
-        user = request.user
-        serializer = self.get_serializer(user)
-        return Response(serializer.data)
-
-    # endpoint chỉnh sửa thông tin cá nhân
-    @action(detail=False, methods=['patch'], permission_classes=[IsAuthenticated], url_path='me')
-    def update_current_user(self, request):
-        serializer = self.get_serializer(
-            request.user,
-            data=request.data,
-            partial=True,
-            context={'request': request}
-        )
-        if serializer.is_valid():
+    # chinh sua thong tin nguoi dung
+    @action(detail=False, methods=['get', 'patch'], permission_classes=[IsAuthenticated], url_path='me')
+    def me(self, request):
+        if request.method == 'GET':
+            serializer = self.get_serializer(request.user, context={'request': request})
+            return Response(serializer.data)
+        elif request.method == 'PATCH':
+            serializer = self.get_serializer(
+                request.user,
+                data=request.data,
+                partial=True,
+                context={'request': request}
+            )
+            serializer.is_valid(raise_exception=True)
             serializer.save()
             return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     # endpoint upload avtar
     @action(
