@@ -44,6 +44,7 @@ from django.http import HttpResponse
 from django.db.models import F, ExpressionWrapper, DecimalField
 from django_filters import rest_framework as filters
 from rest_framework.parsers import MultiPartParser, FormParser
+from decimal import Decimal
 
 # -----------------------
 # 1. UserViewSet
@@ -584,7 +585,10 @@ class BookingViewSet(viewsets.ModelViewSet):
         if booking.status != "pending":
             return Response({"detail": "Booking không ở trạng thái pending"}, status=400)
 
-        total_amount = sum([d.ticket.price * d.quantity for d in booking.details.all()])
+        #total_amount = sum([d.ticket.price * d.quantity for d in booking.details.all()])
+        total_amount = sum([Decimal(d.ticket.price) * d.quantity for d in booking.details.all()])
+        print(">>> [DEBUG] total_amount (VND):", total_amount)
+
         order_id = f"{booking.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
 
         vnp = vnpay()
@@ -611,6 +615,9 @@ class BookingViewSet(viewsets.ModelViewSet):
                 or "127.0.0.1"
         )
         vnp.requestData['vnp_IpAddr'] = ip_addr
+
+        vnp.requestData['vnp_Amount'] = int(total_amount * 100)
+        print(">>> [DEBUG] vnp_Amount gửi đi:", vnp.requestData['vnp_Amount'])
 
         # In log chi tiết
         print(">>> VNPAY requestData:", vnp.requestData)
