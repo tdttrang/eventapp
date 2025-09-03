@@ -1,5 +1,5 @@
 from rest_framework.viewsets import ReadOnlyModelViewSet
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
@@ -672,7 +672,7 @@ class NotificationViewSet(ReadOnlyModelViewSet):
 # Người dung viết đánh giá
 # -----------------------
 class EventReviewViewSet(viewsets.ModelViewSet):
-    queryset = EventReview.objects.all()
+    queryset = EventReview.objects.all().order_by('created_at')
     serializer_class = EventReviewSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -680,21 +680,17 @@ class EventReviewViewSet(viewsets.ModelViewSet):
         # Nếu có truyền event_id → lọc theo sự kiện
         event_id = self.request.query_params.get('event_id')
         if event_id:
-            return EventReview.objects.filter(event_id=event_id)
-        return EventReview.objects.all()
+            return EventReview.objects.filter(event_id=event_id).order_by('created_at')
+        return EventReview.objects.all().order_by('created_at')
 
     def perform_create(self, serializer):
-        # Gán user hiện tại vào review
-        serializer.save(user=self.request.user)
-
-    def perform_create(self, serializer):
+        # Gán user hiện tại vào review và kiểm tra booking
         user = self.request.user
         event = serializer.validated_data['event']
         has_booking = Booking.objects.filter(user=user, details__ticket__event=event, status='paid').exists()
         if not has_booking:
             raise serializers.ValidationError("Bạn chưa tham gia sự kiện này.")
         serializer.save(user=user)
-
 
 # -----------------------
 # ReviewReply
@@ -821,82 +817,101 @@ class FirebaseLoginViewSet(viewsets.ModelViewSet):
                 "detail": str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+
 @csrf_exempt
 def vnpay_ipn(request):
     inputData = request.GET.dict()
 
     # ✅ log toàn bộ tham số VNPAY gửi về để debug
-    print(">>> [VNPAY IPN] params:", inputData)
-
-    vnp = vnpay()
-    vnp.responseData = inputData
-
-    # ✅ validate chữ ký bằng helper
-    if not vnp.validate_response(settings.VNP_HASH_SECRET):
-        return JsonResponse({"RspCode": "97", "Message": "Invalid signature"})
-
-    # Lấy booking_id từ OrderInfo
-    order_info = inputData.get("vnp_OrderInfo", "")
-    booking_id = order_info.replace("Thanh toan booking ", "").strip()
-
-    try:
-        booking = Booking.objects.get(id=booking_id)
-    except Booking.DoesNotExist:
-        return JsonResponse({"RspCode": "01", "Message": "Booking not found"})
-
-    response_code = inputData.get("vnp_ResponseCode")
-    print(f">>> [VNPAY] Booking {booking_id} - ResponseCode: {response_code}")
-
-
-    if response_code == "00":
-        # Kiểm tra nếu đã paid rồi (tránh duplicate update)
-        if booking.status == "paid":
-            return JsonResponse({"RspCode": "02", "Message": "Booking already paid"})
-
-        # Update status, generate QR, save payment_code
-        booking.status = "paid"
-        booking.payment_code = inputData.get("vnp_TransactionNo")
-        booking.qr_code = generate_qr_code(f"Booking:{booking.id}")  # Generate QR
-        booking.save()
-
-        # Gửi email xác nhận (copy từ fake_payment)
-        send_booking_email_brevo(
-            booking.user.email,
-            "Xac nhan dat ve",
-            "Cam on ban da dat ve..."  # Thay bằng nội dung email đầy đủ nếu cần
-        )
-        return JsonResponse({"RspCode": "00", "Message": "Confirm Success"})
-    else:
-        # neu failed, set cancelled
-        booking.status = "cancelled"
-        booking.save()
-        return JsonResponse({"RspCode": "00", "Message": "Payment failed"})
-
-def vnpay_return(request):
-    inputData = request.GET.dict()
-
-    # ✅ log toàn bộ tham số VNPAY gửi về trang return
-    print(">>> [VNPAY RETURN] params:", inputData)
-
+    print(">>> [VNPAY IPN] raw params:", inputData)
 
     vnp = vnpay()
     vnp.responseData = inputData
 
     # validate chữ ký
-    if not vnp.validate_response(settings.VNP_HASH_SECRET):
-        return HttpResponse("Chữ ký không hợp lệ")
+    is_valid = vnp.validate_response(settings.VNP_HASH_SECRET)
+    print(">>> [VNPAY IPN] validate result:", is_valid)
 
+    if not is_valid:
+        print(">>> [VNPAY IPN] ❌ Invalid signature")
+        return JsonResponse({"RspCode": "97", "Message": "Invalid signature"})
+
+    # Lấy booking_id từ OrderInfo
     order_info = inputData.get("vnp_OrderInfo", "")
     booking_id = order_info.replace("Thanh toan booking ", "").strip()
+    print(">>> [VNPAY IPN] booking_id parsed:", booking_id)
 
     try:
         booking = Booking.objects.get(id=booking_id)
     except Booking.DoesNotExist:
-        return HttpResponse("Booking không tồn tại")
-
+        print(">>> [VNPAY IPN] ❌ Booking not found:", booking_id)
+        return JsonResponse({"RspCode": "01", "Message": "Booking not found"})
 
     response_code = inputData.get("vnp_ResponseCode")
-    print(f">>> [VNPAY] Booking {booking_id} - ResponseCode: {response_code}")
+    print(f">>> [VNPAY IPN] Booking {booking_id} - ResponseCode: {response_code}")
+
+    if response_code == "00":
+        if booking.status == "paid":
+            print(f">>> [VNPAY IPN] ⚠️ Booking {booking_id} already PAID")
+            return JsonResponse({"RspCode": "02", "Message": "Booking already paid"})
+
+        # Update status
+        booking.status = "paid"
+        booking.payment_code = inputData.get("vnp_TransactionNo")
+        booking.qr_code = generate_qr_code(f"Booking:{booking.id}")
+        booking.save()
+
+        print(f">>> [VNPAY IPN] ✅ Booking {booking_id} updated to PAID")
+
+        # Gửi email xác nhận
+        try:
+            send_booking_email_brevo(
+                booking.user.email,
+                "Xác nhận đặt vé",
+                "Cảm ơn bạn đã đặt vé..."
+            )
+            print(f">>> [VNPAY IPN] 📧 Email sent to {booking.user.email}")
+        except Exception as e:
+            print(">>> [VNPAY IPN] ⚠️ Lỗi gửi mail:", str(e))
+
+        return JsonResponse({"RspCode": "00", "Message": "Confirm Success"})
+    else:
+        booking.status = "cancelled"
+        booking.save()
+        print(f">>> [VNPAY IPN] ❌ Booking {booking_id} updated to CANCELLED")
+        return JsonResponse({"RspCode": "00", "Message": "Payment failed"})
+
+
+def vnpay_return(request):
+    inputData = request.GET.dict()
+
+    # ✅ Log toàn bộ tham số VNPAY gửi về
+    print(">>> [VNPAY RETURN] raw params:", inputData)
+
+    vnp = vnpay()
+    vnp.responseData = inputData
+
+    # validate chữ ký
+    is_valid = vnp.validate_response(settings.VNP_HASH_SECRET)
+    print(">>> [VNPAY RETURN] validate result:", is_valid)
+
+    if not is_valid:
+        print(">>> [VNPAY RETURN] ❌ Chữ ký không hợp lệ")
+        return HttpResponse("Chữ ký không hợp lệ")
+
+    order_info = inputData.get("vnp_OrderInfo", "")
+    booking_id = order_info.replace("Thanh toan booking ", "").strip()
+    print(">>> [VNPAY RETURN] booking_id parsed:", booking_id)
+
+    try:
+        booking = Booking.objects.get(id=booking_id)
+    except Booking.DoesNotExist:
+        print(">>> [VNPAY RETURN] ❌ Booking không tồn tại:", booking_id)
+        return HttpResponse("Booking không tồn tại")
+
+    response_code = inputData.get("vnp_ResponseCode")
+    print(f">>> [VNPAY RETURN] Booking {booking_id} - ResponseCode: {response_code}")
 
     if response_code == "00":
         if booking.status != "paid":
@@ -904,15 +919,24 @@ def vnpay_return(request):
             booking.payment_code = inputData.get("vnp_TransactionNo")
             booking.qr_code = generate_qr_code(f"Booking:{booking.id}")
             booking.save()
-            send_booking_email_brevo(
-                booking.user.email,
-                "Xác nhận đặt vé",
-                "Cảm ơn bạn đã đặt vé..."
-            )
+
+            print(f">>> [VNPAY RETURN] ✅ Booking {booking_id} updated to PAID")
+
+            # Gửi mail xác nhận
+            try:
+                send_booking_email_brevo(
+                    booking.user.email,
+                    "Xác nhận đặt vé",
+                    "Cảm ơn bạn đã đặt vé..."
+                )
+                print(f">>> [VNPAY RETURN] 📧 Email sent to {booking.user.email}")
+            except Exception as e:
+                print(">>> [VNPAY RETURN] ⚠️ Gửi mail lỗi:", str(e))
+
         return HttpResponse("Thanh toán thành công!")
     else:
         booking.status = "cancelled"
         booking.save()
-        print(f">>> [VNPAY RETURN] Booking {booking_id} updated to cancelled")
+        print(f">>> [VNPAY RETURN] ❌ Booking {booking_id} updated to CANCELLED")
         return HttpResponse("Thanh toán thất bại!")
 
