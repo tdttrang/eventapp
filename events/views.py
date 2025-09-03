@@ -72,11 +72,17 @@ class UserViewSet(viewsets.ModelViewSet):
 
     # endpoint /api/users/me/: lấy thông tin ngươif dùng hiện tại, chỉ người dùng đã đăng nhập mới truy cập được
     # chinh sua thong tin nguoi dung
-    @action(detail=False, methods=['get', 'patch'], permission_classes=[IsAuthenticated], url_path='me')
+    @action(
+        detail=False,
+        methods=['get', 'patch', 'delete'],
+        permission_classes=[IsAuthenticated],
+        url_path='me'
+    )
     def me(self, request):
         if request.method == 'GET':
             serializer = self.get_serializer(request.user, context={'request': request})
             return Response(serializer.data)
+
         elif request.method == 'PATCH':
             serializer = self.get_serializer(
                 request.user,
@@ -87,6 +93,15 @@ class UserViewSet(viewsets.ModelViewSet):
             serializer.is_valid(raise_exception=True)
             serializer.save()
             return Response(serializer.data)
+
+        elif request.method == 'DELETE':
+            # Ví dụ: chỉ xóa avatar
+            user = request.user
+            user.avatar.delete(save=False)  # xóa file vật lý nếu dùng ImageField
+            user.avatar = None
+            user.save()
+            serializer = self.get_serializer(user, context={'request': request})
+            return Response(serializer.data, status=200)
 
     # endpoint upload avtar
     @action(
