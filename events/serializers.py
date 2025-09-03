@@ -28,9 +28,10 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'role', 'is_approved']
 
     def to_representation(self, instance):
-        """Trả về URL Cloudinary đầy đủ"""
+        """Trả về URL Cloudinary đầy đủ và chính xác"""
         data = super().to_representation(instance)
-        data['avatar'] = str(instance.avatar) if instance.avatar else None
+        # Dùng .url để đảm bảo có URL tuyệt đối
+        data['avatar'] = instance.avatar.url if instance.avatar else None
         return data
 
 # Dang ky va duyet organizer
