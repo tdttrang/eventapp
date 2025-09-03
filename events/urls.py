@@ -3,7 +3,8 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     UserViewSet, EventViewSet, TicketViewSet, AdminStatsViewSet,
     BookingViewSet, NotificationViewSet, OrganizerViewSet,
-    FirebaseLoginViewSet, vnpay_ipn, vnpay_return
+    FirebaseLoginViewSet, vnpay_ipn, vnpay_return,
+    EventReviewViewSet, ReviewReplyViewSet
 )
 from rest_framework import permissions
 from drf_yasg.views import get_schema_view
@@ -20,6 +21,10 @@ router.register(r'notifications', NotificationViewSet)
 router.register(r'organizers', OrganizerViewSet, basename='organizer')
 router.register(r'admin/stats', AdminStatsViewSet, basename='admin-stats')
 router.register(r'firebase-login', FirebaseLoginViewSet, basename='firebase-login')
+router.register(r'reviews', EventReviewViewSet)
+router.register(r'review-replies', ReviewReplyViewSet)
+
+
 urlpatterns = [
     path('', include(router.urls)),
     # Thêm các endpoint tùy chỉnh cho MoMo
