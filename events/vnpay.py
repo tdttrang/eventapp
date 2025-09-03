@@ -19,10 +19,10 @@ class vnpay:
         for idx, (key, val) in enumerate(inputData):
             if idx == 0:
                 hashData = f"{key}={val}"
-                queryString = f"{key}={urllib.parse.quote(str(val))}"
+                queryString = f"{key}={urllib.parse.quote(str(val), safe='')}"
             else:
                 hashData += f"&{key}={val}"
-                queryString += f"&{key}={urllib.parse.quote(str(val))}"
+                queryString += f"&{key}={urllib.parse.quote(str(val), safe='')}"
 
         # Sinh SecureHash bằng HMAC SHA512
         secure_hash = self.__hmacsha512(secret_key, hashData)
