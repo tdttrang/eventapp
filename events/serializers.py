@@ -103,9 +103,12 @@ class EventReviewSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     replies = EventReviewReplySerializer(many=True, read_only=True)
 
+    # field event: để xử lý input ID của event khi tạo review, query dùng validate event tồn tại
+    event = serializers.PrimaryKeyRelatedField(queryset=Event.objects.all(), write_only=True)
+
     class Meta:
         model = EventReview
-        fields = ['id', 'user', 'rating', 'comment', 'created_at', 'replies']
+        fields = ['id', 'event', 'user', 'rating', 'comment', 'created_at', 'replies']
 
 
 # -----------------------

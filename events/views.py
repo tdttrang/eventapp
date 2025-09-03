@@ -628,6 +628,12 @@ class BookingViewSet(viewsets.ModelViewSet):
         # In log URL
         print(">>> Payment URL built:", payment_url)
 
+        print(">>> [DEBUG] VNP_TMN_CODE:", settings.VNP_TMN_CODE)
+        print(">>> [DEBUG] VNP_HASH_SECRET length:", len(settings.VNP_HASH_SECRET))
+        print(">>> [DEBUG] VNP_URL:", settings.VNP_URL)
+        print(">>> [DEBUG] VNP_RETURN_URL:", settings.VNP_RETURN_URL)
+        print(">>> [DEBUG] VNP_IPN_URL:", settings.VNP_IPN_URL)
+
         return Response({"payment_url": payment_url})
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
