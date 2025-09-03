@@ -60,6 +60,7 @@ class vnpay:
         print(">>> [VNPAY validate_response] secure_hash:", secure_hash)
         print(">>> [VNPAY validate_response] input_hash:", vnp_SecureHash)
 
+        print(">>> [VNPAY validate_response] full responseData:", self.responseData)
         return vnp_SecureHash.upper() == secure_hash.upper()
 
     @staticmethod

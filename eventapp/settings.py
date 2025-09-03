@@ -247,6 +247,9 @@ VNP_URL = os.getenv("VNP_URL")
 VNP_RETURN_URL = os.getenv("VNP_RETURN_URL")
 VNP_IPN_URL = os.getenv("VNP_IPN_URL")
 
+print(">>> [DEBUG] VNP_TMN_CODE:", VNP_TMN_CODE)
+print(">>> [DEBUG] VNP_HASH_SECRET length:", len(VNP_HASH_SECRET) if VNP_HASH_SECRET else None)
+
 # Cau hinh Celery su dung Redis lam broker
 CELERY_BROKER_URL = 'redis://localhost:6379/0'   # Ket noi den Redis local
 CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
