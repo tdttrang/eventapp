@@ -617,18 +617,29 @@ class BookingViewSet(viewsets.ModelViewSet):
         print(">>> [DEBUG] current_time UTC:", timezone.now())
 
         # ip address
-        try:
-            ip_addr = (
-                    request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0]
-                    or request.META.get("REMOTE_ADDR", "")
-                    or "127.0.0.1"
-            )
-            # ép IPv6 -> IPv4
-            ip_addr = socket.gethostbyname(ip_addr)
-        except Exception:
-            ip_addr = "127.0.0.1"
-        vnp.requestData['vnp_IpAddr'] = ip_addr
+        # try:
+        #     ip_addr = (
+        #             request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0]
+        #             or request.META.get("REMOTE_ADDR", "")
+        #             or "127.0.0.1"
+        #     )
+        #     # ép IPv6 -> IPv4
+        #     ip_addr = socket.gethostbyname(ip_addr)
+        # except Exception:
+        #     ip_addr = "127.0.0.1"
+        # vnp.requestData['vnp_IpAddr'] = ip_addr
 
+        xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
+        if xff:
+            ip_addr = xff.split(",")[0].strip()
+        else:
+            ip_addr = request.META.get("REMOTE_ADDR", "127.0.0.1")
+
+        # Nếu dạng IPv6 mapped IPv4 ('::ffff:1.2.3.4') -> lấy IPv4
+        if ip_addr.startswith("::ffff:"):
+            ip_addr = ip_addr.split(":")[-1]
+
+        vnp.requestData["vnp_IpAddr"] = ip_addr
         # In log chi tiết
         print(">>> VNPAY requestData:", vnp.requestData)
 
@@ -699,11 +710,14 @@ class EventReviewViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         user = self.request.user
         event = serializer.validated_data['event']
-        print(f"Debug: User={user.id}, Event={event.id}, Validated_data={serializer.validated_data}")
         has_booking = Booking.objects.filter(user=user, details__ticket__event=event, status='paid').exists()
         if not has_booking:
-            raise serializers.ValidationError("Bạn chưa tham gia sự kiện này.")
+            return Response({
+                "detail": "Bạn cần đặt vé tham gia sự kiện trước khi bình luận. Vui lòng kiểm tra và thử lại!",
+                "requires_booking": True
+            }, status=status.HTTP_403_FORBIDDEN)
         serializer.save(user=user)
+        return Response({"detail": "Đánh giá của bạn đã được gửi thành công."}, status=status.HTTP_201_CREATED)
 
 # -----------------------
 # ReviewReply

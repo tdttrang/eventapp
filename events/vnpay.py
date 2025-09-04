@@ -32,11 +32,14 @@ class vnpay:
             hashlib.sha512
         ).hexdigest()
 
-        # Append secure hash
-        full_url = (
-            f"{vnpay_payment_url}?{queryString}"
-            f"&vnp_SecureHashType=HMACSHA512&vnp_SecureHash={secure_hash}"
-        )
+        # # Append secure hash
+        # full_url = (
+        #     f"{vnpay_payment_url}?{queryString}"
+        #     f"&vnp_SecureHashType=HMACSHA512&vnp_SecureHash={secure_hash}"
+        # )
+
+        # Không gửi vnp_SecureHashType (một số sandbox/endpoint từ chối sớm nếu có)
+        full_url = f"{vnpay_payment_url}?{queryString}&vnp_SecureHash={secure_hash}"
 
         # Log debug
         print(">>> [VNPAY get_payment_url] hashData:", hashData)
