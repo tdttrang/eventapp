@@ -737,6 +737,22 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         return Response({"capture": capture_resp})
 
+    @action(detail=True, methods=["get"])
+    def paypal_return(self, request, pk=None):
+        booking = self.get_object()
+        token = request.GET.get("token")
+        payer_id = request.GET.get("PayerID")
+
+        # Capture order
+        paypal = PayPalClient()
+        capture_resp = paypal.capture_order(token)
+        if capture_resp.get("status") == "COMPLETED":
+            booking.status = "paid"
+            booking.save()
+
+        # Redirect ve frontend app
+        frontend_url = f"eventappfrontend://payment/result?status=success&bookingId={booking.id}&message=PayPal+payment+success"
+        return redirect(frontend_url)
 
 # -----------------------
 # 5. NotificationViewSet
