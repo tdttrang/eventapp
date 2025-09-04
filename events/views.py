@@ -365,7 +365,14 @@ class BookingViewSet(viewsets.ModelViewSet):
             return self.queryset.filter(user=user).prefetch_related('details__ticket__event')
         return self.queryset.none()
 
-
+    @action(detail=False, methods=["get"], url_path="paid")
+    def paid_bookings(self, request):
+        user = request.user
+        qs = Booking.objects.filter(user=user, status="paid") \
+            .prefetch_related('details__ticket__event') \
+            .order_by('-created_at')
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
     # def perform_create(self, serializer):
     #     # Tạo booking và gán user
     #     booking = serializer.save(user=self.request.user)
