@@ -3,7 +3,7 @@ import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
 import qrcode
 from cloudinary.uploader import upload
-
+import os
 
 def create_notification(user, notification_type, subject, message, related_object_id=None):
     """
@@ -19,7 +19,7 @@ def create_notification(user, notification_type, subject, message, related_objec
 
 def send_booking_email_brevo(to_email, subject, message):
     configuration = sib_api_v3_sdk.Configuration()
-    configuration.api_key['api-key'] = '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'
+    configuration.api_key['api-key'] = os.getenv('BREVO_API_KEY')
 
     api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
     send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
