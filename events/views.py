@@ -4,6 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
+import logging
 import pytz, socket
 import uuid
 from .utils import send_booking_email_brevo, create_notification
@@ -600,7 +601,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         vnp.requestData['vnp_CurrCode'] = 'VND'
         vnp.requestData['vnp_TxnRef'] = order_id
         vnp.requestData['vnp_OrderInfo'] = f"Thanh toan booking {booking.id}"
-        vnp.requestData['vnp_OrderType'] = 'other'
+        vnp.requestData['vnp_OrderType'] = 'billpayment'
         vnp.requestData['vnp_Locale'] = 'vn'
         # ✅ Thêm BankCode test của VNPAY (NCB là thẻ test)
         vnp.requestData['vnp_BankCode'] = 'NCB'
@@ -695,6 +696,7 @@ class NotificationViewSet(ReadOnlyModelViewSet):
 # EventReview
 # Người dung viết đánh giá
 # -----------------------
+logger = logging.getLogger(__name__)
 class EventReviewViewSet(viewsets.ModelViewSet):
     queryset = EventReview.objects.all().order_by('created_at')
     serializer_class = EventReviewSerializer
@@ -711,13 +713,15 @@ class EventReviewViewSet(viewsets.ModelViewSet):
         user = self.request.user
         event = serializer.validated_data['event']
         has_booking = Booking.objects.filter(user=user, details__ticket__event=event, status='paid').exists()
+        logger.info(f"Debug: User={user.id}, Event={event.id}, Has Booking={has_booking}")
         if not has_booking:
             return Response({
-                "detail": "Bạn cần đặt vé tham gia sự kiện trước khi bình luận. Vui lòng kiểm tra và thử lại!",
+                "detail": "Bạn cần đặt vé hoặc tham gia sự kiện trước khi bình luận. Vui lòng kiểm tra và thử lại!",
                 "requires_booking": True
             }, status=status.HTTP_403_FORBIDDEN)
-        serializer.save(user=user)
-        return Response({"detail": "Đánh giá của bạn đã được gửi thành công."}, status=status.HTTP_201_CREATED)
+        review = serializer.save(user=user)
+        logger.info(f"Review saved: {review.id}, User={user.id}, Event={event.id}")
+        return Response({"detail": "Đánh giá của bạn đã được gửi thành công.", "review_id": review.id}, status=status.HTTP_201_CREATED)
 
 # -----------------------
 # ReviewReply
