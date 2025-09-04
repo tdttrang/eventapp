@@ -735,7 +735,18 @@ class BookingViewSet(viewsets.ModelViewSet):
             booking.save()
             print(f">>> [Booking {booking.id}] marked as paid")
 
-        return Response({"capture": capture_resp})
+            # Tạo QR code
+            qr_data = f"BookingID: {booking.id}\nUser: {booking.user.email}\nTotal: {booking.total_amount}\nEventApp"
+            qr_public_id = generate_qr_code(qr_data)
+            booking.qr_code = qr_public_id  # nếu booking model có field lưu QR cloudinary
+            booking.save()
+
+            # Gửi email
+            subject = f"Booking Confirmation - {booking.id}"
+            message = f"Cảm ơn bạn đã thanh toán. Mã QR vé của bạn:\n{qr_data}"
+            send_booking_email_brevo(booking.user.email, subject, message)
+
+        return Response({"capture": capture_resp, "qr_code": qr_public_id})
 
     @action(detail=True, methods=["get"])
     def paypal_return(self, request, pk=None):
@@ -750,9 +761,12 @@ class BookingViewSet(viewsets.ModelViewSet):
             booking.status = "paid"
             booking.save()
 
-        # Redirect ve frontend app
-        frontend_url = f"eventappfrontend://payment/result?status=success&bookingId={booking.id}&message=PayPal+payment+success"
-        return redirect(frontend_url)
+        return Response({
+            "status": "success",
+            "booking_id": booking.id,
+            "message": "PayPal payment successful"
+        })
+
 
 # -----------------------
 # 5. NotificationViewSet
@@ -1075,12 +1089,12 @@ def paypal_config(request):
 @permission_classes([permissions.AllowAny])
 def paypal_return(request, booking_id):
     """
-    Endpoint PayPal redirect khi thanh toan thanh cong
-    PayPal se goi ve return_url ma ta truyen vao create_order
+    Endpoint PayPal redirect khi thanh toán thành công.
+    Cập nhật booking, giảm số lượng vé, tạo QR code, gửi email.
+    Trả JSON cho app.
     """
     print(">>> [PayPal return] booking_id:", booking_id, "params:", request.query_params)
 
-    # Lay orderID tu query neu co
     order_id = request.query_params.get("token") or request.query_params.get("orderID")
     booking = get_object_or_404(Booking, pk=booking_id)
 
@@ -1093,16 +1107,48 @@ def paypal_return(request, booking_id):
                 pu.get("payments", {}).get("captures", [{}])[0].get("status", "").upper() == "COMPLETED"
                 for pu in capture_resp.get("purchase_units", [])
             ):
+                # --- Cập nhật trạng thái booking ---
                 booking.status = "paid"
                 booking.payment_code = order_id
                 booking.save()
+
+                # --- Giảm số lượng vé ---
+                for detail in booking.details.all():
+                    ticket = detail.ticket
+                    ticket.quantity = max(ticket.quantity - detail.quantity, 0)
+                    ticket.save()
+
+                # --- Tạo QR code ---
+                qr_data = f"BookingID: {booking.id}\nUser: {booking.user.email}\nEventApp"
+                qr_public_id = generate_qr_code(qr_data)
+                booking.qr_code = qr_public_id
+                booking.save()
+
+                # --- Gửi email ---
+                subject = f"Booking Confirmation - {booking.id}"
+                message = f"Cảm ơn bạn đã thanh toán. Mã QR vé của bạn:\n{qr_data}"
+                send_booking_email_brevo(booking.user.email, subject, message)
+
                 print(f">>> [Booking {booking.id}] marked as paid by PayPal return")
+
+                # --- Trả JSON cho app ---
+                return Response({
+                    "status": "success",
+                    "booking_id": booking.id,
+                    "message": "PayPal payment successful",
+                    "qr_code": booking.qr_code
+                })
         except Exception as e:
             print(">>> [PayPal return] capture error:", str(e))
+            return Response({
+                "status": "error",
+                "message": str(e)
+            }, status=500)
 
-    # Dieu huong ve frontend
-    frontend_url = f"{settings.SITE_DOMAIN}/payment/result?status=success&bookingId={booking.id}&message=PayPal%20payment%20success"
-    return redirect(frontend_url)
+    return Response({
+        "status": "error",
+        "message": "Invalid order or booking"
+    }, status=400)
 
 
 @api_view(["GET"])
@@ -1115,6 +1161,9 @@ def paypal_cancel(request, booking_id):
 
     booking = get_object_or_404(Booking, pk=booking_id)
 
-    # Khong doi booking.status, chi dieu huong ve frontend
-    frontend_url = f"{settings.SITE_DOMAIN}/payment/result?status=failed&bookingId={booking.id}&message=PayPal%20payment%20cancelled"
-    return redirect(frontend_url)
+    return Response({
+        "status": "cancelled",
+        "booking_id": booking.id,
+        "message": "PayPal payment cancelled"
+    })
+

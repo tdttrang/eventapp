@@ -39,7 +39,7 @@ urlpatterns = [
 
     # endpoint paypal config
     path("paypal/config/", paypal_config, name="paypal-config"),
-path("paypal_return/<int:booking_id>/", paypal_return, name="paypal_return"),
+    path("paypal_return/<int:booking_id>/", paypal_return, name="paypal_return"),
     path("paypal_cancel/<int:booking_id>/", paypal_cancel, name="paypal_cancel"),
 ]
 
