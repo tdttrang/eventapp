@@ -4,14 +4,14 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
-import pytz
+import pytz, socket
 import uuid
 from .utils import send_booking_email_brevo, create_notification
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import IsAdminUser, AllowAny
-from . import serializers
+# from . import serializers
 from firebase_admin import credentials, initialize_app, _apps, auth
 from datetime import datetime, timedelta
 from oauth2_provider.models import AccessToken, Application
@@ -591,36 +591,47 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         order_id = f"{booking.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
 
+        # khởi tạo vnpay
         vnp = vnpay()
         vnp.requestData['vnp_Version'] = '2.1.0'
         vnp.requestData['vnp_Command'] = 'pay'
         vnp.requestData['vnp_TmnCode'] = settings.VNP_TMN_CODE
-        vnp.requestData['vnp_Amount'] = int(total_amount) * 100
+        vnp.requestData['vnp_Amount'] = int(total_amount * 100)
         vnp.requestData['vnp_CurrCode'] = 'VND'
         vnp.requestData['vnp_TxnRef'] = order_id
         vnp.requestData['vnp_OrderInfo'] = f"Thanh toan booking {booking.id}"
         vnp.requestData['vnp_OrderType'] = 'other'
         vnp.requestData['vnp_Locale'] = 'vn'
-
         vnp.requestData['vnp_ReturnUrl'] = settings.VNP_RETURN_URL
         vnp.requestData['vnp_IpnUrl'] = settings.VNP_IPN_URL
 
+        # set timezone VN
         tz = pytz.timezone('Asia/Ho_Chi_Minh')
-        current_time = datetime.now(tz)
+        current_time = timezone.localtime(timezone.now())
         vnp.requestData['vnp_CreateDate'] = current_time.strftime("%Y%m%d%H%M%S")
         vnp.requestData['vnp_ExpireDate'] = (current_time + timedelta(minutes=15)).strftime("%Y%m%d%H%M%S")
-        ip_addr = (
-                request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0]
-                or request.META.get("REMOTE_ADDR", "")
-                or "127.0.0.1"
-        )
-        vnp.requestData['vnp_IpAddr'] = ip_addr
 
-        vnp.requestData['vnp_Amount'] = int(total_amount * 100)
-        print(">>> [DEBUG] vnp_Amount gửi đi:", vnp.requestData['vnp_Amount'])
+        print(">>> [DEBUG] current_time local:", current_time)
+        print(">>> [DEBUG] current_time UTC:", timezone.now())
+
+        # ip address
+        try:
+            ip_addr = (
+                    request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0]
+                    or request.META.get("REMOTE_ADDR", "")
+                    or "127.0.0.1"
+            )
+            # ép IPv6 -> IPv4
+            ip_addr = socket.gethostbyname(ip_addr)
+        except Exception:
+            ip_addr = "127.0.0.1"
+        vnp.requestData['vnp_IpAddr'] = ip_addr
 
         # In log chi tiết
         print(">>> VNPAY requestData:", vnp.requestData)
+
+        vnp.requestData['vnp_Amount'] = int(total_amount * 100)
+        print(">>> [DEBUG] vnp_Amount gửi đi:", vnp.requestData['vnp_Amount'])
 
         # Build URL
         payment_url = vnp.get_payment_url(settings.VNP_URL, settings.VNP_HASH_SECRET)
@@ -838,8 +849,7 @@ def vnpay_ipn(request):
         return JsonResponse({"RspCode": "97", "Message": "Invalid signature"})
 
     # Lấy booking_id từ OrderInfo
-    order_info = inputData.get("vnp_OrderInfo", "")
-    booking_id = order_info.replace("Thanh toan booking ", "").strip()
+    booking_id = inputData.get("vnp_OrderInfo", "").replace("Thanh toan booking ", "").strip()
     print(">>> [VNPAY IPN] booking_id parsed:", booking_id)
 
     try:
@@ -882,7 +892,7 @@ def vnpay_ipn(request):
         print(f">>> [VNPAY IPN] ❌ Booking {booking_id} updated to CANCELLED")
         return JsonResponse({"RspCode": "00", "Message": "Payment failed"})
 
-
+@csrf_exempt
 def vnpay_return(request):
     inputData = request.GET.dict()
 
@@ -900,8 +910,7 @@ def vnpay_return(request):
         print(">>> [VNPAY RETURN] ❌ Chữ ký không hợp lệ")
         return HttpResponse("Chữ ký không hợp lệ")
 
-    order_info = inputData.get("vnp_OrderInfo", "")
-    booking_id = order_info.replace("Thanh toan booking ", "").strip()
+    booking_id = inputData.get("vnp_OrderInfo", "").replace("Thanh toan booking ", "").strip()
     print(">>> [VNPAY RETURN] booking_id parsed:", booking_id)
 
     try:
