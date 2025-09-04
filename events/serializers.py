@@ -110,6 +110,12 @@ class EventReviewSerializer(serializers.ModelSerializer):
         model = EventReview
         fields = ['id', 'event', 'user', 'rating', 'comment', 'created_at', 'replies']
 
+# hiển thị thông tin cần thiết của event bên trong ticket
+class EventInTicketSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Event
+        # Chỉ lấy các trường mà frontend cần để hiển thị trong card vé
+        fields = ['id', 'name', 'date', 'location', 'media']
 
 # -----------------------
 # 4. TicketSerializer
@@ -118,7 +124,9 @@ class EventReviewSerializer(serializers.ModelSerializer):
 # TicketSerializer (fix available_quantity: lọc status)
 # -----------------------
 class TicketSerializer(serializers.ModelSerializer):
+    event = EventInTicketSerializer(read_only=True)
     available_quantity = serializers.SerializerMethodField()
+
     class Meta:
         model = Ticket
         fields = ['id', 'event', 'price', 'quantity', 'ticket_class', 'available_quantity' ]
