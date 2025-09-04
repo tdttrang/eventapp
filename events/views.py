@@ -602,6 +602,8 @@ class BookingViewSet(viewsets.ModelViewSet):
         vnp.requestData['vnp_OrderInfo'] = f"Thanh toan booking {booking.id}"
         vnp.requestData['vnp_OrderType'] = 'other'
         vnp.requestData['vnp_Locale'] = 'vn'
+        # ✅ Thêm BankCode test của VNPAY (NCB là thẻ test)
+        vnp.requestData['vnp_BankCode'] = 'NCB'
         vnp.requestData['vnp_ReturnUrl'] = settings.VNP_RETURN_URL
         vnp.requestData['vnp_IpnUrl'] = settings.VNP_IPN_URL
 
@@ -695,9 +697,9 @@ class EventReviewViewSet(viewsets.ModelViewSet):
         return EventReview.objects.all().order_by('created_at')
 
     def perform_create(self, serializer):
-        # Gán user hiện tại vào review và kiểm tra booking
         user = self.request.user
         event = serializer.validated_data['event']
+        print(f"Debug: User={user.id}, Event={event.id}, Validated_data={serializer.validated_data}")
         has_booking = Booking.objects.filter(user=user, details__ticket__event=event, status='paid').exists()
         if not has_booking:
             raise serializers.ValidationError("Bạn chưa tham gia sự kiện này.")
