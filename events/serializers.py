@@ -186,13 +186,11 @@ class EventCreateSerializer(serializers.ModelSerializer):
 
 # Serializer cho chi tiết vé
 class BookingDetailSerializer(serializers.ModelSerializer):
-    ticket_class = serializers.CharField(source="ticket.ticket_class", read_only=True)
-    price = serializers.DecimalField(source="ticket.price", read_only=True, max_digits=10, decimal_places=2)
+    ticket = TicketSerializer(read_only=True)
 
     class Meta:
         model = BookingDetail
-        fields = ["id", "ticket", "ticket_class", "price", "quantity"]
-
+        fields = ["id", "ticket", "quantity"]
 
 # -----------------------
 # 6. BookingSerializer
