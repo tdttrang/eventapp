@@ -748,25 +748,82 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         return Response({"capture": capture_resp, "qr_code": qr_public_id})
 
-    @action(detail=True, methods=["get"])
+    # @action(detail=True, methods=["get"])
+    # def paypal_return(self, request, pk=None):
+    #     booking = self.get_object()
+    #     token = request.GET.get("token")
+    #     payer_id = request.GET.get("PayerID")
+    #
+    #     # Capture order
+    #     paypal = PayPalClient()
+    #     capture_resp = paypal.capture_order(token)
+    #     if capture_resp.get("status") == "COMPLETED":
+    #         booking.status = "paid"
+    #         booking.save()
+    #
+    #     return Response({
+    #         "status": "success",
+    #         "booking_id": booking.id,
+    #         "message": "PayPal payment successful"
+    #     })
+
+    @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated])
     def paypal_return(self, request, pk=None):
         booking = self.get_object()
-        token = request.GET.get("token")
-        payer_id = request.GET.get("PayerID")
 
-        # Capture order
-        paypal = PayPalClient()
-        capture_resp = paypal.capture_order(token)
-        if capture_resp.get("status") == "COMPLETED":
-            booking.status = "paid"
-            booking.save()
+        # Use the reliable Order ID saved in your database, not the temporary URL token.
+        order_id = booking.payment_code
 
-        return Response({
-            "status": "success",
-            "booking_id": booking.id,
-            "message": "PayPal payment successful"
-        })
+        print(f"--- PayPal Return for Booking ID: {booking.id} ---")
+        print(f"Attempting to capture PayPal Order ID: {order_id}")
 
+        # check if the booking has already been paid to prevent errors
+        if booking.status == 'paid':
+            print(f"INFO: Booking {booking.id} is already marked as paid.")
+            return Response({
+                "status": "success",
+                "booking_id": booking.id,
+                "message": "Payment was already confirmed."
+            })
+        try:
+            paypal = PayPalClient()
+            capture_resp = paypal.capture_order(order_id)  # Use the correct order_id
+            # Add logging for debugging
+            print(f"PayPal Capture API Response: {capture_resp}")
+
+            # Check if the capture was actually COMPLETED.
+            if capture_resp and capture_resp.get("status") == "COMPLETED":
+                # --- SUCCESS PATH ---
+                print(f"SUCCESS: Capture for Booking {booking.id} completed.")
+                booking.status = "paid"
+                # Add any other logic here (like generating QR code, sending email, etc.)
+                booking.save()
+
+                # Only return success if the database was updated
+                return Response({
+                    "status": "success",
+                    "booking_id": booking.id,
+                    "message": "PayPal payment captured successfully."
+                })
+            else:
+                # --- FAILURE PATH ---
+                print(f"ERROR: Capture for Booking {booking.id} failed. Response: {capture_resp}")
+                booking.status = "failed"  # Update status to 'failed'
+                booking.save()
+
+                # Return an error message to the app
+                return Response({
+                    "status": "error",
+                    "booking_id": booking.id,
+                    "message": "PayPal payment capture failed."
+                }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            # Handle any unexpected errors during the API call.
+            print(f"EXCEPTION during capture for Booking {booking.id}: {str(e)}")
+            return Response({
+                "status": "error",
+                "message": "An server error occurred during payment capture."
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # -----------------------
 # 5. NotificationViewSet
