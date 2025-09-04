@@ -5,7 +5,7 @@ from .views import (
     BookingViewSet, NotificationViewSet, OrganizerViewSet,
     FirebaseLoginViewSet, vnpay_ipn, vnpay_return, paypal_config,
     paypal_return, paypal_cancel,
-    EventReviewViewSet, ReviewReplyViewSet
+    EventReviewViewSet, ReviewReplyViewSet, NotificationSenderViewSet,
 )
 from rest_framework import permissions
 from drf_yasg.views import get_schema_view
@@ -24,6 +24,7 @@ router.register(r'admin/stats', AdminStatsViewSet, basename='admin-stats')
 router.register(r'firebase-login', FirebaseLoginViewSet, basename='firebase-login')
 router.register(r'reviews', EventReviewViewSet)
 router.register(r'review-replies', ReviewReplyViewSet)
+router.register(r'notifications/sender', NotificationSenderViewSet, basename='notification-sender')
 
 
 urlpatterns = [

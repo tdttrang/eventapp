@@ -305,6 +305,33 @@ class NotificationSerializer(serializers.ModelSerializer):
         return None
 
 
+# 8. NotificationCreationSerializer
+# Dùng cho organizer/admin để tạo thông báo mới
+# -----------------------
+class NotificationCreationSerializer(serializers.Serializer):
+    # Loại đối tượng nhận thông báo: 'all', 'event_attendees', 'specific_users', 'role'
+    target_audience = serializers.CharField(max_length=50, default='specific_users')
+
+    # Dữ liệu để lọc theo loại đối tượng
+    # Ví dụ: nếu target_audience là 'event_attendees', cần gửi kèm event_id
+    filter_data = serializers.JSONField(required=False, default={})
+
+    # Các trường thông tin của thông báo
+    subject = serializers.CharField(max_length=255)
+    message = serializers.CharField()
+    notification_type = serializers.CharField(max_length=255)
+    related_object_id = serializers.IntegerField(required=False, allow_null=True)
+
+    def validate(self, data):
+        target = data.get('target_audience')
+        filter_data = data.get('filter_data', {})
+
+        if target == 'event_attendees' and 'event_id' not in filter_data:
+            raise serializers.ValidationError(
+                {"filter_data": "Trường 'event_id' là bắt buộc khi gửi thông báo cho người tham gia sự kiện."}
+            )
+        return data
+
 # firebase login
 class FirebaseLoginSerializer(serializers.Serializer):
     id_token = serializers.CharField()

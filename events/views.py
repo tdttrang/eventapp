@@ -31,7 +31,7 @@ from .serializers import (
     UserSerializer, EventSerializer, EventReviewSerializer,
     EventReviewReplySerializer, TicketSerializer, BookingCreateSerializer,
     BookingSerializer, NotificationSerializer, EventCreateSerializer,
-    OrganizerRegisterSerializer, UserRegisterSerializer
+    OrganizerRegisterSerializer, UserRegisterSerializer, NotificationCreationSerializer,
 )
 from .permissions import IsApprovedOrganizer, IsOwner, IsAdmin
 import traceback
@@ -773,21 +773,110 @@ class BookingViewSet(viewsets.ModelViewSet):
 # Hiển thị thông báo của người dùng
 # -----------------------
 class NotificationViewSet(ReadOnlyModelViewSet):
-    queryset = Notification.objects.all()
+    # chỉ user đã đăng nhập mới có quyền xem thông báo của mình
     serializer_class = NotificationSerializer
-    permission_classes = [IsOwner]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # Chỉ hiển thị thông báo của người dùng hiện tại
-        return Notification.objects.filter(user=self.request.user)
+        # Chỉ hiển thị thông báo của người dùng hiện tại, sx theo tgian mới nhất
+        return Notification.objects.filter(user=self.request.user).order_by('-created_at')
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    # endpoint cập nhật trạng thái đã đọc
+    # PATCH /api/notifications/{pk}/mark_as_read/
+    @action(detail=True, methods=['patch'])
     def mark_as_read(self, request, pk=None):
-        notification = self.get_object()
-        notification.is_read = True
-        notification.save()
-        return Response({'detail': 'Thông báo đã được đánh dấu là đã đọc.'})
+        try:
+            notification = self.get_queryset().get(pk=pk)
+            notification.is_read = True
+            notification.save()
+            # Trả về thông báo đã cập nhật
+            serializer = self.get_serializer(notification)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Notification.DoesNotExist:
+            return Response(
+                {'detail': 'Không tìm thấy thông báo hoặc bạn không có quyền truy cập.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
+    # Endpoint để cập nhật tất cả thông báo thành đã đọc
+    # PATCH /api/notifications/mark_all_as_read/
+    @action(detail=False, methods=['patch'])
+    def mark_all_as_read(self, request):
+        notifications = self.get_queryset().filter(is_read=False)
+        count = notifications.update(is_read=True)
+        return Response(
+            {'message': f'Đã cập nhật {count} thông báo thành đã đọc.'},
+            status=status.HTTP_200_OK
+        )
+
+
+# 6. ViewSet để Organizer/Admin gửi thông báo
+# -----------------------
+# -----------------------
+class NotificationSenderViewSet(viewsets.ViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+
+    # POST /api/notifications/send/
+    @action(detail=False, methods=['post'], url_path='send')
+    def send_notification(self, request):
+        if not (request.user.role == 'admin' or (request.user.is_organizer() and request.user.is_approved)):
+            return Response(
+                {'detail': 'Bạn không có quyền thực hiện hành động này.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = NotificationCreationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        validated_data = serializer.validated_data
+        target_audience = validated_data.get('target_audience')
+        filter_data = validated_data.get('filter_data', {})
+
+        # 1. Xác định danh sách người dùng
+        users_to_notify = User.objects.none()
+        if target_audience == 'all':
+            users_to_notify = User.objects.all()
+        elif target_audience == 'event_attendees':
+            event_id = filter_data.get('event_id')
+            if event_id:
+                # Tìm tất cả người dùng đã mua vé cho sự kiện này
+                attendees = Booking.objects.filter(ticket__event_id=event_id, is_paid=True).values_list('user',
+                                                                                                        flat=True).distinct()
+                users_to_notify = User.objects.filter(id__in=attendees)
+            else:
+                return Response(
+                    {'detail': 'Thiếu ID sự kiện để gửi thông báo cho người tham dự.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        elif target_audience == 'role':
+            target_role = filter_data.get('role')
+            if target_role:
+                users_to_notify = User.objects.filter(role=target_role)
+        # Có thể thêm các điều kiện lọc khác ở đây
+
+        if not users_to_notify.exists():
+            return Response(
+                {'detail': 'Không tìm thấy người dùng nào phù hợp với điều kiện.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 2. Tạo và lưu các đối tượng Notification
+        notifications_to_create = [
+            Notification(
+                user=user,
+                notification_type=validated_data.get('notification_type'),
+                subject=validated_data.get('subject'),
+                message=validated_data.get('message'),
+                related_object_id=validated_data.get('related_object_id')
+            ) for user in users_to_notify
+        ]
+
+        created_objects = Notification.objects.bulk_create(notifications_to_create)
+
+        return Response(
+            {'message': f'Đã gửi thành công {len(created_objects)} thông báo.'},
+            status=status.HTTP_201_CREATED
+        )
 
 # -----------------------
 # EventReview
