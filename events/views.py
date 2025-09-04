@@ -1279,6 +1279,8 @@ def paypal_return(request, booking_id):
             booking.qr_code = qr_public_id
 
             booking.save()
+            print(f">>> DEBUG: Booking {booking.id} status after save: {booking.status}") # Thêm dòng này
+
             # --- Gửi email ---
             subject = f"Booking Confirmation - {booking.id}"
             message = f"Cảm ơn bạn đã thanh toán. Mã QR vé của bạn:\n{qr_data}"
