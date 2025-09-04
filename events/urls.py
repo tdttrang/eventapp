@@ -4,6 +4,7 @@ from .views import (
     UserViewSet, EventViewSet, TicketViewSet, AdminStatsViewSet,
     BookingViewSet, NotificationViewSet, OrganizerViewSet,
     FirebaseLoginViewSet, vnpay_ipn, vnpay_return, paypal_config,
+    paypal_return, paypal_cancel,
     EventReviewViewSet, ReviewReplyViewSet
 )
 from rest_framework import permissions
@@ -38,5 +39,7 @@ urlpatterns = [
 
     # endpoint paypal config
     path("paypal/config/", paypal_config, name="paypal-config"),
+path("paypal_return/<int:booking_id>/", paypal_return, name="paypal_return"),
+    path("paypal_cancel/<int:booking_id>/", paypal_cancel, name="paypal_cancel"),
 ]
 

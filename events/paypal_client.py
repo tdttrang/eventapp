@@ -1,21 +1,20 @@
 # paypal_client.py
 # PayPal REST helper - get token, create order, capture order
-# Khong dung SDK, goi thang API bang requests
 
 import time
 import requests
 import logging
 from django.conf import settings
 
-# Config logger
 logger = logging.getLogger("paypal_client")
 logger.setLevel(logging.DEBUG)
+
 
 class PayPalClient:
     def __init__(self):
         # lay client id va secret tu settings
         self.client_id = settings.PAYPAL_CLIENT_ID
-        self.secret = settings.PAYPAL_SECRET
+        self.secret = settings.PAYPAL_CLIENT_SECRET  # fix lai dung key
         self.mode = getattr(settings, "PAYPAL_MODE", "sandbox")  # sandbox hoac live
 
         # chon base url

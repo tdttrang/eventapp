@@ -6,6 +6,8 @@ import json
 from firebase_admin import credentials
 from celery.schedules import crontab
 import dj_database_url
+from decimal import Decimal
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -283,3 +285,11 @@ CSRF_TRUSTED_ORIGINS = [
 
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
+
+
+# paypal
+PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID")
+PAYPAL_CLIENT_SECRET = os.getenv("PAYPAL_CLIENT_SECRET")
+PAYPAL_MODE = os.getenv("PAYPAL_MODE", "sandbox")
+EXCHANGE_RATE_VND_TO_USD = Decimal(os.getenv("EXCHANGE_RATE_VND_TO_USD", "26000"))
+SITE_DOMAIN = os.getenv("SITE_DOMAIN", "https://eventapp-production-bcaa.up.railway.app")

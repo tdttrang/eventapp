@@ -4,6 +4,7 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
+from django.shortcuts import get_object_or_404, redirect
 import logging
 import pytz, socket
 import uuid
@@ -688,13 +689,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         print(">>> [DEBUG] total_amount (USD):", total_usd, "rate:", rate)
 
         paypal = PayPalClient()
-        site_domain = getattr(settings, "SITE_DOMAIN", "").rstrip(
-            "/") or "https://eventapp-production-bcaa.up.railway.app"
-
-        return_url = f"{site_domain}/api/paypal_return/{booking.id}"
-        cancel_url = f"{site_domain}/api/paypal_cancel/{booking.id}"
-
-        order = paypal.create_order(total_usd, currency="USD", return_url=return_url, cancel_url=cancel_url)
+        order = paypal.create_order(total_usd, currency="USD")
 
         order_id = order.get("id")
         approve_link = None
@@ -703,12 +698,19 @@ class BookingViewSet(viewsets.ModelViewSet):
                 approve_link = link.get("href")
                 break
 
-        # luu orderID vao booking.payment_code
         booking.payment_code = order_id
         booking.save()
 
-        print(">>> [PayPal create] order_id:", order_id)
+        print(">>> [PayPal create] booking:", booking.id, "order_id:", order_id)
         print(">>> [PayPal create] approve_link:", approve_link)
+
+        site_domain = getattr(settings, "SITE_DOMAIN", "").rstrip(
+            "/") or "https://eventapp-production-bcaa.up.railway.app"
+
+        return_url = f"{site_domain}/api/paypal_return/{booking.id}/"
+        cancel_url = f"{site_domain}/api/paypal_cancel/{booking.id}/"
+
+        order = paypal.create_order(total_usd, currency="USD", return_url=return_url, cancel_url=cancel_url)
 
         return Response({
             "orderID": order_id,
@@ -731,19 +733,21 @@ class BookingViewSet(viewsets.ModelViewSet):
             print(">>> [PayPal capture] error:", str(e))
             return Response({"detail": "Error capturing order", "error": str(e)}, status=500)
 
-        print(">>> [PayPal capture] resp:", capture_resp)
+        print(">>> [PayPal capture] booking:", booking.id, "resp:", capture_resp)
 
-        # check status
-        status = capture_resp.get("status", "")
-        if status.upper() == "COMPLETED" or any(
+        status_val = capture_resp.get("status", "")
+        if status_val.upper() == "COMPLETED" or any(
                 pu.get("payments", {}).get("captures", [{}])[0].get("status", "").upper() == "COMPLETED"
                 for pu in capture_resp.get("purchase_units", [])
         ):
             booking.status = "paid"
+            booking.payment_code = order_id
             booking.save()
             print(f">>> [Booking {booking.id}] marked as paid")
 
         return Response({"capture": capture_resp})
+
+
 # -----------------------
 # 5. NotificationViewSet
 # Hiển thị thông báo của người dùng
@@ -1059,3 +1063,52 @@ def paypal_config(request):
         "PAYPAL_CLIENT_ID": settings.PAYPAL_CLIENT_ID,
         "PAYPAL_MODE": getattr(settings, "PAYPAL_MODE", "sandbox")
     })
+
+
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def paypal_return(request, booking_id):
+    """
+    Endpoint PayPal redirect khi thanh toan thanh cong
+    PayPal se goi ve return_url ma ta truyen vao create_order
+    """
+    print(">>> [PayPal return] booking_id:", booking_id, "params:", request.query_params)
+
+    # Lay orderID tu query neu co
+    order_id = request.query_params.get("token") or request.query_params.get("orderID")
+    booking = get_object_or_404(Booking, pk=booking_id)
+
+    if order_id:
+        paypal = PayPalClient()
+        try:
+            capture_resp = paypal.capture_order(order_id)
+            status_val = capture_resp.get("status", "")
+            if status_val.upper() == "COMPLETED" or any(
+                pu.get("payments", {}).get("captures", [{}])[0].get("status", "").upper() == "COMPLETED"
+                for pu in capture_resp.get("purchase_units", [])
+            ):
+                booking.status = "paid"
+                booking.payment_code = order_id
+                booking.save()
+                print(f">>> [Booking {booking.id}] marked as paid by PayPal return")
+        except Exception as e:
+            print(">>> [PayPal return] capture error:", str(e))
+
+    # Dieu huong ve frontend
+    frontend_url = f"{settings.SITE_DOMAIN}/payment/result?status=success&bookingId={booking.id}&message=PayPal%20payment%20success"
+    return redirect(frontend_url)
+
+
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def paypal_cancel(request, booking_id):
+    """
+    Endpoint PayPal redirect khi user cancel thanh toan
+    """
+    print(">>> [PayPal cancel] booking_id:", booking_id, "params:", request.query_params)
+
+    booking = get_object_or_404(Booking, pk=booking_id)
+
+    # Khong doi booking.status, chi dieu huong ve frontend
+    frontend_url = f"{settings.SITE_DOMAIN}/payment/result?status=failed&bookingId={booking.id}&message=PayPal%20payment%20cancelled"
+    return redirect(frontend_url)
