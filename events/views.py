@@ -1,6 +1,6 @@
 from rest_framework.viewsets import ReadOnlyModelViewSet
 from rest_framework import viewsets, permissions, serializers
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
@@ -46,7 +46,8 @@ from django.db.models import F, ExpressionWrapper, DecimalField
 from django_filters import rest_framework as filters
 from rest_framework.parsers import MultiPartParser, FormParser
 from decimal import Decimal
-
+from .paypal_client import PayPalClient
+from rest_framework.exceptions import PermissionDenied
 # -----------------------
 # 1. UserViewSet
 # Chỉ admin mới được xem danh sách người dùng
@@ -670,7 +671,79 @@ class BookingViewSet(viewsets.ModelViewSet):
         send_booking_email_brevo(booking.user.email, "Xac nhan dat ve", "Cam on ban da dat ve...")
         return Response({"detail": "Fake payment success"})
 
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    def paypal_create(self, request, pk=None):
+        booking = self.get_object()
 
+        if booking.status != "pending":
+            return Response({"detail": "Booking khong o trang thai pending"}, status=400)
+
+        # tinh tong VND tu booking.details
+        total_vnd = sum([Decimal(d.ticket.price) * d.quantity for d in booking.details.all()])
+        print(">>> [DEBUG] total_amount (VND):", total_vnd)
+
+        # doi sang USD (26000 VND = 1 USD)
+        rate = Decimal(getattr(settings, "EXCHANGE_RATE_VND_TO_USD", "26000"))
+        total_usd = (total_vnd / rate).quantize(Decimal("0.01"))
+        print(">>> [DEBUG] total_amount (USD):", total_usd, "rate:", rate)
+
+        paypal = PayPalClient()
+        site_domain = getattr(settings, "SITE_DOMAIN", "").rstrip(
+            "/") or "https://eventapp-production-bcaa.up.railway.app"
+
+        return_url = f"{site_domain}/api/paypal_return/{booking.id}"
+        cancel_url = f"{site_domain}/api/paypal_cancel/{booking.id}"
+
+        order = paypal.create_order(total_usd, currency="USD", return_url=return_url, cancel_url=cancel_url)
+
+        order_id = order.get("id")
+        approve_link = None
+        for link in order.get("links", []):
+            if link.get("rel") == "approve":
+                approve_link = link.get("href")
+                break
+
+        # luu orderID vao booking.payment_code
+        booking.payment_code = order_id
+        booking.save()
+
+        print(">>> [PayPal create] order_id:", order_id)
+        print(">>> [PayPal create] approve_link:", approve_link)
+
+        return Response({
+            "orderID": order_id,
+            "approve_url": approve_link,
+            "amount_usd": f"{total_usd:.2f}"
+        })
+
+    @action(detail=True, methods=["post"], permission_classes=[permissions.IsAuthenticated])
+    def paypal_capture(self, request, pk=None):
+        booking = self.get_object()
+        order_id = request.data.get("orderID")
+
+        if not order_id:
+            return Response({"detail": "orderID is required"}, status=400)
+
+        paypal = PayPalClient()
+        try:
+            capture_resp = paypal.capture_order(order_id)
+        except Exception as e:
+            print(">>> [PayPal capture] error:", str(e))
+            return Response({"detail": "Error capturing order", "error": str(e)}, status=500)
+
+        print(">>> [PayPal capture] resp:", capture_resp)
+
+        # check status
+        status = capture_resp.get("status", "")
+        if status.upper() == "COMPLETED" or any(
+                pu.get("payments", {}).get("captures", [{}])[0].get("status", "").upper() == "COMPLETED"
+                for pu in capture_resp.get("purchase_units", [])
+        ):
+            booking.status = "paid"
+            booking.save()
+            print(f">>> [Booking {booking.id}] marked as paid")
+
+        return Response({"capture": capture_resp})
 # -----------------------
 # 5. NotificationViewSet
 # Hiển thị thông báo của người dùng
@@ -712,17 +785,25 @@ class EventReviewViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         user = self.request.user
         event = serializer.validated_data['event']
-        has_booking = Booking.objects.filter(user=user, details__ticket__event=event, status='paid').exists()
+
+        # Kiểm tra xem người dùng đã có vé đã thanh toán cho sự kiện này chưa
+        has_booking = Booking.objects.filter(
+            user=user,
+            details__ticket__event=event,
+            status='paid'
+        ).exists()
+
         logger.info(f"Debug: User={user.id}, Event={event.id}, Has Booking={has_booking}")
+
+        # Nếu không có vé, ném ra lỗi PermissionDenied
         if not has_booking:
-            return Response({
+            raise PermissionDenied({
                 "detail": "Bạn cần đặt vé hoặc tham gia sự kiện trước khi bình luận. Vui lòng kiểm tra và thử lại!",
                 "requires_booking": True
-            }, status=status.HTTP_403_FORBIDDEN)
-        review = serializer.save(user=user)
-        logger.info(f"Review saved: {review.id}, User={user.id}, Event={event.id}")
-        return Response({"detail": "Đánh giá của bạn đã được gửi thành công.", "review_id": review.id}, status=status.HTTP_201_CREATED)
+            })
 
+        # Nếu có vé, lưu bình luận và gán người dùng
+        serializer.save(user=user)
 # -----------------------
 # ReviewReply
 # Organizer phản hồi
@@ -969,3 +1050,12 @@ def vnpay_return(request):
         print(f">>> [VNPAY RETURN] ❌ Booking {booking_id} updated to CANCELLED")
         return HttpResponse("Thanh toán thất bại!")
 
+
+# endpoint public config cho frontend
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def paypal_config(request):
+    return Response({
+        "PAYPAL_CLIENT_ID": settings.PAYPAL_CLIENT_ID,
+        "PAYPAL_MODE": getattr(settings, "PAYPAL_MODE", "sandbox")
+    })

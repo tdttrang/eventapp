@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     UserViewSet, EventViewSet, TicketViewSet, AdminStatsViewSet,
     BookingViewSet, NotificationViewSet, OrganizerViewSet,
-    FirebaseLoginViewSet, vnpay_ipn, vnpay_return,
+    FirebaseLoginViewSet, vnpay_ipn, vnpay_return, paypal_config,
     EventReviewViewSet, ReviewReplyViewSet
 )
 from rest_framework import permissions
@@ -36,5 +36,7 @@ urlpatterns = [
     path("vnpay_ipn/", vnpay_ipn, name="vnpay_ipn"),
     path("vnpay_return/", vnpay_return, name="vnpay_return"),
 
+    # endpoint paypal config
+    path("paypal/config/", paypal_config, name="paypal-config"),
 ]
 
