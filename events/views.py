@@ -679,38 +679,28 @@ class BookingViewSet(viewsets.ModelViewSet):
         if booking.status != "pending":
             return Response({"detail": "Booking khong o trang thai pending"}, status=400)
 
-        # tinh tong VND tu booking.details
+        # tính tổng VND
         total_vnd = sum([Decimal(d.ticket.price) * d.quantity for d in booking.details.all()])
-        print(">>> [DEBUG] total_amount (VND):", total_vnd)
-
-        # doi sang USD (26000 VND = 1 USD)
         rate = Decimal(getattr(settings, "EXCHANGE_RATE_VND_TO_USD", "26000"))
         total_usd = (total_vnd / rate).quantize(Decimal("0.01"))
-        print(">>> [DEBUG] total_amount (USD):", total_usd, "rate:", rate)
+
+        site_domain = getattr(settings, "SITE_DOMAIN", "").rstrip(
+            "/") or "https://eventapp-production-bcaa.up.railway.app"
+        return_url = f"{site_domain}/api/paypal_return/{booking.id}/"
+        cancel_url = f"{site_domain}/api/paypal_cancel/{booking.id}/"
 
         paypal = PayPalClient()
-        order = paypal.create_order(total_usd, currency="USD")
+        order = paypal.create_order(total_usd, currency="USD", return_url=return_url,
+                                    cancel_url=cancel_url)  # <<< chỉ gọi 1 lần với URL đầy đủ
 
         order_id = order.get("id")
-        approve_link = None
-        for link in order.get("links", []):
-            if link.get("rel") == "approve":
-                approve_link = link.get("href")
-                break
+        approve_link = next((link.get("href") for link in order.get("links", []) if link.get("rel") == "approve"), None)
 
         booking.payment_code = order_id
         booking.save()
 
         print(">>> [PayPal create] booking:", booking.id, "order_id:", order_id)
         print(">>> [PayPal create] approve_link:", approve_link)
-
-        site_domain = getattr(settings, "SITE_DOMAIN", "").rstrip(
-            "/") or "https://eventapp-production-bcaa.up.railway.app"
-
-        return_url = f"{site_domain}/api/paypal_return/{booking.id}/"
-        cancel_url = f"{site_domain}/api/paypal_cancel/{booking.id}/"
-
-        order = paypal.create_order(total_usd, currency="USD", return_url=return_url, cancel_url=cancel_url)
 
         return Response({
             "orderID": order_id,
