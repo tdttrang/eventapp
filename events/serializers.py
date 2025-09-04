@@ -200,11 +200,20 @@ class BookingDetailSerializer(serializers.ModelSerializer):
 # -----------------------
 class BookingSerializer(serializers.ModelSerializer):
     details = BookingDetailSerializer(many=True, read_only=True)
+    qr_code = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Booking
         fields = ["id", "user", "status", "created_at", "expires_at", "qr_code", "payment_code", "details"]
 
+    def get_qr_code(self, booking):
+        """
+        Hàm này sẽ được gọi tự động để lấy giá trị cho trường qr_code.
+        Nó sẽ kiểm tra và trả về public_id một cách an toàn.
+        """
+        if booking.qr_code and hasattr(booking.qr_code, 'public_id'):
+            return booking.qr_code.public_id
+        return None
 
 # Serializer khi tạo booking (bỏ trừ trực tiếp, thêm validate tồn kho)
 class BookingCreateSerializer(serializers.Serializer):

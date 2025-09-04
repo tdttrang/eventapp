@@ -359,7 +359,7 @@ class BookingViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         # Chỉ hiển thị booking của người dùng hiện tại
-        return Booking.objects.filter(user=self.request.user)
+        return Booking.objects.filter(user=self.request.user, status="paid").order_by('-created_at')
 
     # def perform_create(self, serializer):
     #     # Tạo booking và gán user
