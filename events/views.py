@@ -8,7 +8,7 @@ from django.shortcuts import get_object_or_404, redirect
 import logging
 import pytz, socket
 import uuid
-from .utils import send_booking_email_brevo, create_notification
+from .utils import send_booking_email_brevo, create_notification, generate_qr_code
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -1240,61 +1240,73 @@ def paypal_return(request, booking_id):
     Trả JSON cho app.
     """
     print(">>> [PayPal return] booking_id:", booking_id, "params:", request.query_params)
-
-    order_id = request.query_params.get("token") or request.query_params.get("orderID")
     booking = get_object_or_404(Booking, pk=booking_id)
+    # Thêm kiểm tra để tránh xử lý lại đơn đã thanh toán ---
+    if booking.status == 'paid':
+        print(f"INFO: Booking {booking.id} is already paid. Returning existing data.")
+        return Response({
+            "status": "success",
+            "booking_id": booking.id,
+            "message": "Payment was already confirmed.",
+            "qr_code": booking.qr_code.public_id if booking.qr_code else None
+        })
 
-    if order_id:
+    order_id = booking.payment_code
+    if not order_id:
+        return Response({"status": "error", "message": "Booking has no payment code."}, status=400)
+
+    print(f">>> [PayPal return] Capturing order {order_id} for booking {booking_id}")
+
+    try:
         paypal = PayPalClient()
-        try:
-            capture_resp = paypal.capture_order(order_id)
-            status_val = capture_resp.get("status", "")
-            if status_val.upper() == "COMPLETED" or any(
-                pu.get("payments", {}).get("captures", [{}])[0].get("status", "").upper() == "COMPLETED"
-                for pu in capture_resp.get("purchase_units", [])
-            ):
-                # --- Cập nhật trạng thái booking ---
-                booking.status = "paid"
-                booking.payment_code = order_id
-                booking.save()
+        capture_resp = paypal.capture_order(order_id)
 
-                # --- Giảm số lượng vé ---
-                for detail in booking.details.all():
-                    ticket = detail.ticket
-                    ticket.quantity = max(ticket.quantity - detail.quantity, 0)
-                    ticket.save()
+        # --- kiểm tra trạng thái thành công ---
+        if capture_resp and capture_resp.get("status") == "COMPLETED":
+            # --- Cập nhật trạng thái booking ---
+            booking.status = "paid"
+            # booking.payment_code đã được lưu từ trước, không cần lưu lại
 
-                # --- Tạo QR code ---
-                qr_data = f"BookingID: {booking.id}\nUser: {booking.user.email}\nEventApp"
-                qr_public_id = generate_qr_code(qr_data)
-                booking.qr_code = qr_public_id
-                booking.save()
+            # --- Giảm số lượng vé ---
+            for detail in booking.details.all():
+                ticket = detail.ticket
+                ticket.quantity = max(ticket.quantity - detail.quantity, 0)
+                ticket.save()
 
-                # --- Gửi email ---
-                subject = f"Booking Confirmation - {booking.id}"
-                message = f"Cảm ơn bạn đã thanh toán. Mã QR vé của bạn:\n{qr_data}"
-                send_booking_email_brevo(booking.user.email, subject, message)
+            # --- Tạo QR code ---
+            qr_data = f"BookingID:{booking.id};User:{booking.user.email};Status:Paid"
+            qr_public_id = generate_qr_code(qr_data)
+            booking.qr_code = qr_public_id
 
-                print(f">>> [Booking {booking.id}] marked as paid by PayPal return")
+            booking.save()
+            # --- Gửi email ---
+            subject = f"Booking Confirmation - {booking.id}"
+            message = f"Cảm ơn bạn đã thanh toán. Mã QR vé của bạn:\n{qr_data}"
+            send_booking_email_brevo(booking.user.email, subject, message)
 
-                # --- Trả JSON cho app ---
-                return Response({
-                    "status": "success",
-                    "booking_id": booking.id,
-                    "message": "PayPal payment successful",
-                    "qr_code": booking.qr_code
-                })
-        except Exception as e:
-            print(">>> [PayPal return] capture error:", str(e))
+            print(f">>> [Booking {booking.id}] marked as paid by PayPal return")
+
+            return Response({
+                "status": "success",
+                "booking_id": booking.id,
+                "message": "PayPal payment successful",
+                # Trả về public_id để frontend sử dụng
+                "qr_code": booking.qr_code.public_id if booking.qr_code else None
+            })
+        else:
+            # Xử lý khi capture thất bại
+            booking.status = "failed"
+            booking.save()
             return Response({
                 "status": "error",
-                "message": str(e)
-            }, status=500)
+                "message": "Failed to capture payment.",
+                "details": capture_resp
+            }, status=400)
 
-    return Response({
-        "status": "error",
-        "message": "Invalid order or booking"
-    }, status=400)
+    except Exception as e:
+        print(">>> [PayPal return] capture error:", str(e))
+        return Response({"status": "error", "message": str(e)}, status=500)
+
 
 
 @api_view(["GET"])
