@@ -6,11 +6,8 @@ from .views import (
     FirebaseLoginViewSet, vnpay_ipn, vnpay_return, paypal_config,
     paypal_return, paypal_cancel,
     EventReviewViewSet, ReviewReplyViewSet, NotificationSenderViewSet,
+    OrganizerStatsViewSet,
 )
-from rest_framework import permissions
-from drf_yasg.views import get_schema_view
-from drf_yasg import openapi
-from django.urls import path
 
 # Tạo router tự động
 router = DefaultRouter()
@@ -25,6 +22,7 @@ router.register(r'firebase-login', FirebaseLoginViewSet, basename='firebase-logi
 router.register(r'reviews', EventReviewViewSet)
 router.register(r'review-replies', ReviewReplyViewSet)
 router.register(r'notifications/sender', NotificationSenderViewSet, basename='notification-sender')
+router.register(r'organizer/stats', OrganizerStatsViewSet, basename='organizer-stats')
 
 
 urlpatterns = [

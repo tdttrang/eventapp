@@ -1,13 +1,8 @@
-# Import các thư viện cần thiết từ Django Rest Framework
 from rest_framework import serializers
-from django.db import models
 from .models import (
     User, Event, EventReview, EventReviewReply,
     Ticket, Booking, Notification, BookingDetail
 )
-import qrcode
-from io import BytesIO
-from cloudinary.uploader import upload
 from django.db.models import Sum
 from django.utils import timezone
 from datetime import timedelta
@@ -210,7 +205,8 @@ class BookingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Booking
-        fields = ["id", "user", "status", "created_at", "expires_at", "qr_code", "payment_code", "details"]
+        fields = ["id", "user", "status", "created_at", "expires_at",
+                  "qr_code", "payment_code", "details",  "checked_in_at"]
 
     def get_qr_code(self, booking):
         """

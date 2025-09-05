@@ -1,34 +1,31 @@
-from rest_framework.viewsets import ReadOnlyModelViewSet
-from rest_framework import viewsets, permissions, serializers
+from rest_framework.viewsets import ReadOnlyModelViewSet, GenericViewSet
+from rest_framework import viewsets, permissions
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404
 import logging
-import pytz, socket
-import uuid
+import pytz
+from io import BytesIO
 from .utils import send_booking_email_brevo, create_notification, generate_qr_code
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import IsAdminUser, AllowAny
-# from . import serializers
 from firebase_admin import credentials, initialize_app, _apps, auth
-from datetime import datetime, timedelta
+from datetime import timedelta
 from oauth2_provider.models import AccessToken, Application
 from oauthlib.common import generate_token
 from django.contrib.auth import get_user_model
-from .serializers import FirebaseLoginSerializer
-from rest_framework.viewsets import GenericViewSet
-from django.db.models.functions import TruncMonth, TruncQuarter
-from django.db.models import Count, Sum
+from django.db.models.functions import TruncMonth, TruncQuarter, TruncDay
+from django.db.models import Count, Sum, F, ExpressionWrapper, DecimalField
 from .models import (
     User, Event, EventReview, EventReviewReply,
     Ticket, Booking, Notification, BookingDetail
 )
 from .serializers import (
-    UserSerializer, EventSerializer, EventReviewSerializer,
+    UserSerializer, EventSerializer, EventReviewSerializer, FirebaseLoginSerializer,
     EventReviewReplySerializer, TicketSerializer, BookingCreateSerializer,
     BookingSerializer, NotificationSerializer, EventCreateSerializer,
     OrganizerRegisterSerializer, UserRegisterSerializer, NotificationCreationSerializer,
@@ -38,7 +35,7 @@ import traceback
 import hmac, hashlib
 import requests
 from django.conf import settings
-from .utils import generate_qr_code
+from .utils import generate_qr_code, generate_event_report_pdf
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from .vnpay import vnpay
@@ -301,6 +298,30 @@ class EventViewSet(viewsets.ModelViewSet):
     def get_categories(self, request):
         categories = Event.objects.values_list('category', flat=True).distinct()
         return Response(categories)
+
+    @action(detail=True, methods=['get'], url_path='export-pdf', permission_classes=[IsAuthenticated])
+    def export_pdf(self, request, pk=None):
+        event = self.get_object()
+        user = request.user
+        if not (user.role == 'admin' or (user.role == 'organizer' and user.is_approved and event.organizer == user)):
+            return Response({'detail': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+        from_date = request.query_params.get('from')
+        to_date = request.query_params.get('to')
+
+        # goi ham tao pdf tu utils
+        try:
+            pdf_buffer = generate_event_report_pdf(event, from_date, to_date)
+        except Exception as e:
+            # neu co loi thi tra ve thong bao de debug
+            return Response({'detail': 'Generate PDF error', 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # tra ve file PDF
+        response = HttpResponse(pdf_buffer.read(), content_type='application/pdf')
+        filename = f"event_{event.id}_report_{from_date or 'all'}_{to_date or 'all'}.pdf"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
 # -----------------------
 # 3. TicketViewSet
 # Quản lý vé cho từng sự kiện
@@ -373,26 +394,13 @@ class BookingViewSet(viewsets.ModelViewSet):
             .order_by('-created_at')
         serializer = self.get_serializer(qs, many=True)
         return Response(serializer.data)
-    # def perform_create(self, serializer):
-    #     # Tạo booking và gán user
-    #     booking = serializer.save(user=self.request.user)
-    #
-    #     # Gửi thông báo khi đặt vé thành công
-    #     create_notification(
-    #         user=self.request.user,
-    #         notification_type="booking",
-    #         subject="Đặt vé thành công",
-    #         message=f"Bạn đã đặt vé cho sự kiện '{booking.ticket.event.name}'. Vui lòng thanh toán trong 10 phút.",
-    #         related_object_id=booking.id
-    #     )
 
     def get_serializer_class(self):
         if self.action in ["create", "book"]:
             return BookingCreateSerializer
         return BookingSerializer
 
-        # override create -> cho phép tạo booking nhiều vé
-
+    # override create -> cho phép tạo booking nhiều vé
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
@@ -475,6 +483,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Vé không hợp lệ để check-in.'}, status=status.HTTP_400_BAD_REQUEST)
 
         booking.status = 'checked_in'
+        booking.checked_in_at = timezone.now()
         booking.save()
         return Response({'detail': 'Check-in thành công.'})
 
@@ -837,6 +846,47 @@ class BookingViewSet(viewsets.ModelViewSet):
                 "message": "An server error occurred during payment capture."
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+    @action(detail=False, methods=['post'], url_path='validate', permission_classes=[IsAuthenticated])
+    def validate_booking(self, request):
+        code = request.data.get('code') or request.data.get('booking_id')
+        if not code:
+            return Response({'detail': 'Missing code or booking_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # co the la booking id so hoac string co so -> lay so dau tien
+        import re
+        booking_id = None
+        if isinstance(code, int):
+            booking_id = code
+        else:
+            m = re.search(r'(\d+)', str(code))
+            if m:
+                booking_id = int(m.group(1))
+
+        if not booking_id:
+            return Response({'detail': 'Invalid code format'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            booking = Booking.objects.prefetch_related('details__ticket__event').get(pk=booking_id)
+        except Booking.DoesNotExist:
+            return Response({'detail': 'Booking not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # kiem tra quyen: chi admin hoac organizer cua event duoc validate
+        user = request.user
+        event = booking.details.first().ticket.event if booking.details.exists() else None
+        if not (user.role == 'admin' or (event and event.organizer == user and user.is_approved)):
+            return Response({'detail': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+        already_checked_in = booking.status == 'checked_in'
+        is_paid = booking.status == 'paid' or booking.status == 'checked_in'
+
+        # tra ve thong tin booking co ban
+        data = BookingSerializer(booking).data
+        return Response({
+            'valid': is_paid,
+            'already_checked_in': already_checked_in,
+            'booking': data
+        }, status=status.HTTP_200_OK)
 # -----------------------
 # 5. NotificationViewSet
 # Hiển thị thông báo của người dùng
@@ -1028,6 +1078,90 @@ class AdminStatsViewSet(GenericViewSet):
             'total_events': Event.objects.count(),  # Tổng số sự kiện
             'monthly_stats': monthly_data  # Dữ liệu theo tháng
         })
+
+class OrganizerStatsViewSet(GenericViewSet):
+    """
+    API cho organizer lay thong ke.
+    GET /api/organizer/stats/?event_id=&from=&to=&group_by=day|month
+    """
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request):
+        user = request.user
+        # kiem tra quyen: chi admin hoac organizer da duoc duyet duoc truy cap
+        if not (user.role == 'admin' or (user.role == 'organizer' and user.is_approved)):
+            return Response({'detail': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+        event_id = request.query_params.get('event_id')
+        from_date = request.query_params.get('from')
+        to_date = request.query_params.get('to')
+        group_by = request.query_params.get('group_by', 'day')  # default 'day'
+
+        # bat dau tu BookingDetail va loc booking da 'paid'
+        details = BookingDetail.objects.filter(booking__status='paid')
+
+        # neu la organizer thi chi lay cac event cua organizer
+        if user.role == 'organizer':
+            details = details.filter(ticket__event__organizer=user)
+
+        if event_id:
+            details = details.filter(ticket__event_id=event_id)
+        if from_date:
+            details = details.filter(booking__created_at__date__gte=from_date)
+        if to_date:
+            details = details.filter(booking__created_at__date__lte=to_date)
+
+        # bieu thuc doanh thu
+        revenue_expr = ExpressionWrapper(F('ticket__price') * F('quantity'),
+                                        output_field=DecimalField(max_digits=12, decimal_places=2))
+
+        # totals
+        totals = details.aggregate(
+            tickets_sold=Sum('quantity'),
+            revenue=Sum(revenue_expr)
+        )
+        tickets_sold = totals.get('tickets_sold') or 0
+        revenue = float(totals.get('revenue') or 0)
+
+        # checked in tickets: sum quantity tu booking trang thai checked_in
+        checked_in_total = BookingDetail.objects.filter(
+            booking__status='checked_in',
+            ticket__event__organizer=user if user.role == 'organizer' else None
+        )
+        if user.role != 'organizer':
+            # neu admin, bo loc organizer
+            checked_in_total = BookingDetail.objects.filter(booking__status='checked_in')
+        checked_in_sum = checked_in_total.aggregate(sum_checked=Sum('quantity'))['sum_checked'] or 0
+
+        # series theo ngay hoac thang
+        trunc_func = TruncDay if group_by == 'day' else TruncMonth
+        series_qs = details.annotate(period=trunc_func('booking__created_at')) \
+                           .values('period') \
+                           .annotate(tickets=Sum('quantity'),
+                                     revenue=Sum(revenue_expr)) \
+                           .order_by('period')
+
+        series = []
+        for row in series_qs:
+            period = row['period']
+            # convert date/time to isoformat string
+            period_str = period.date().isoformat() if hasattr(period, 'date') else str(period)
+            series.append({
+                'period': period_str,
+                'tickets_sold': int(row.get('tickets') or 0),
+                'revenue': float(row.get('revenue') or 0)
+            })
+
+        return Response({
+            'totals': {
+                'tickets_sold': tickets_sold,
+                'revenue': revenue,
+                'checked_in': checked_in_sum
+            },
+            'series': series
+        }, status=status.HTTP_200_OK)
+
+
 
 User = get_user_model()
 

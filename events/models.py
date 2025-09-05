@@ -1,13 +1,9 @@
-from django.db import models
-
-# Create your models here.
 from cloudinary.models import CloudinaryField
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
 from datetime import timedelta
-
 
 # -----------------------
 # 1. User (Nguoi dung)
@@ -170,16 +166,12 @@ class Booking(models.Model):
     STATUS_CHOICES = [
         ("pending", "Pending"),
         ("paid", "Paid"),
-        ("cancelled", "Cancelled")
+        ("cancelled", "Cancelled"),
+        ("checked_in", "Checked-in"),
     ]
     # Nguoi dat ve
     user = models.ForeignKey(User, on_delete=models.CASCADE)
 
-    # Ve duoc dat
-    # ticket = models.ForeignKey("Ticket", on_delete=models.CASCADE)
-
-    # So luong ve
-    # quantity = models.PositiveIntegerField(default=1)  # Thêm default
     # Trang thai don hang
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending")
 
@@ -189,10 +181,14 @@ class Booking(models.Model):
     # Thoi gian het han giu cho (10 phut)
     expires_at = models.DateTimeField(null=True, blank=True)  # Sửa default
 
+    # QR code public id tren Cloudinary
     qr_code = CloudinaryField("qr_code", null=True, blank=True)
 
     # Lưu order_id của MoMo
     payment_code = models.CharField(max_length=200, blank=True, null=True)
+
+    # Thoi diem checkin
+    checked_in_at = models.DateTimeField(null=True, blank=True)
 
     def save(self, *args, **kwargs):
         # Neu tao moi thi dat thoi gian het han = hien tai + 10 phut
