@@ -193,6 +193,16 @@ class EventViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     ordering = ['id']
 
+    def get_queryset(self):
+        user = self.request.user
+        # Kiểm tra xem người dùng đã đăng nhập và có vai trò là organizer chưa
+        if user.is_authenticated and user.role == 'organizer':
+            # Lọc danh sách sự kiện theo organizer hiện tại
+            return Event.objects.filter(organizer=user)
+
+        # Nếu không, trả về danh sách tất cả sự kiện như mặc định
+        return super().get_queryset()
+
     def get_permissions(self):
         # Nếu là tạo, sửa, xóa thì cần organizer đã được duyệt
         if self.action in ['create', 'update', 'destroy']:
