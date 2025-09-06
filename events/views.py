@@ -53,7 +53,7 @@ from rest_framework.exceptions import PermissionDenied
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     # tạo endpoint /users/register, mở quyền cho tất cả (allowany)
     @action(detail=False, methods=['post'], permission_classes=[AllowAny], serializer_class=UserRegisterSerializer,
