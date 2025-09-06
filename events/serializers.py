@@ -6,6 +6,8 @@ from .models import (
 from django.db.models import Sum
 from django.utils import timezone
 from datetime import timedelta
+import cloudinary.uploader
+import json
 
 
 
@@ -170,12 +172,17 @@ class EventSerializer(serializers.ModelSerializer):
 # Dùng để tao su kien
 # -----------------------
 class EventCreateSerializer(serializers.ModelSerializer):
+    # Trường để nhận chuỗi Json chứa thông tin các loại vé từ FE
+    tickets = serializers.CharField(write_only=True)
+    media = serializers.ImageField(required=False, write_only=True)
+
     class Meta:
         model = Event
         fields = [
-            'name', 'description', 'date', 'location', 'capacity',
-            'media', 'category', 'ticket_price_regular', 'ticket_price_vip'
+            'name', 'description', 'date', 'location', 'category',
+            'media', 'tickets'
         ]
+        read_only_fields = ['id']
 
     def validate(self, data):
         user = self.context['request'].user
@@ -184,8 +191,25 @@ class EventCreateSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
+        # Lấy user từ context, giống như code của bạn
         user = self.context['request'].user
-        return Event.objects.create(organizer=user, **validated_data)
+
+        # Tách dữ liệu tickets ra khỏi dữ liệu chính
+        tickets_data_str = validated_data.pop('tickets')
+
+        # Tạo sự kiện với các dữ liệu còn lại và gán organizer
+        event = Event.objects.create(organizer=user, **validated_data)
+
+        # Xử lý tạo các object Ticket từ chuỗi JSON
+        tickets_data = json.loads(tickets_data_str)
+        for ticket_info in tickets_data:
+            Ticket.objects.create(
+                event=event,
+                ticket_class=ticket_info['ticket_class'],
+                price=ticket_info['price'],
+                quantity=ticket_info['quantity']
+            )
+        return event
 
 # Serializer cho chi tiết vé
 class BookingDetailSerializer(serializers.ModelSerializer):

@@ -192,6 +192,7 @@ class EventViewSet(viewsets.ModelViewSet):
     ordering_fields = ['date', 'average_rating', 'popularity']
     permission_classes = [IsAuthenticated]
     ordering = ['id']
+    parser_classes = [MultiPartParser, FormParser]
 
     def get_queryset(self):
         user = self.request.user
