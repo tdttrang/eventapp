@@ -70,12 +70,6 @@ def generate_qr_code(data):
     return response['public_id']
 
 def generate_event_report_pdf(event, from_date=None, to_date=None):
-    """
-       Ham tao PDF thong ke cho 1 event.
-       Tra ket qua BytesIO object (binary PDF).
-       - event: Event instance
-       - from_date, to_date: chuoi 'YYYY-MM-DD' hoac None
-    """
     # 1) lay du lieu thong ke tu DB (booking da 'paid')
     details = BookingDetail.objects.filter(ticket__event=event, booking__status='paid')
 
