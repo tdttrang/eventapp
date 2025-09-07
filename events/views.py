@@ -1150,10 +1150,6 @@ class AdminStatsViewSet(GenericViewSet):
         })
 
 class OrganizerStatsViewSet(GenericViewSet):
-    """
-    API cho organizer lay thong ke.
-    GET /api/organizer/stats/?event_id=&from=&to=&group_by=day|month
-    """
     permission_classes = [IsAuthenticated]
 
     def list(self, request):
@@ -1183,7 +1179,7 @@ class OrganizerStatsViewSet(GenericViewSet):
 
         # bieu thuc doanh thu
         revenue_expr = ExpressionWrapper(F('ticket__price') * F('quantity'),
-                                        output_field=DecimalField(max_digits=12, decimal_places=2))
+                                         output_field=DecimalField(max_digits=12, decimal_places=2))
 
         # totals
         totals = details.aggregate(
@@ -1193,23 +1189,23 @@ class OrganizerStatsViewSet(GenericViewSet):
         tickets_sold = totals.get('tickets_sold') or 0
         revenue = float(totals.get('revenue') or 0)
 
-        # checked in tickets: sum quantity tu booking trang thai checked_in
-        checked_in_total = BookingDetail.objects.filter(
-            booking__status='checked_in',
-            ticket__event__organizer=user if user.role == 'organizer' else None
-        )
-        if user.role != 'organizer':
-            # neu admin, bo loc organizer
-            checked_in_total = BookingDetail.objects.filter(booking__status='checked_in')
-        checked_in_sum = checked_in_total.aggregate(sum_checked=Sum('quantity'))['sum_checked'] or 0
+        # FIX: checked in tickets logic
+        checked_in_query = BookingDetail.objects.filter(booking__status='checked_in')
+        if user.role == 'organizer':
+            checked_in_query = checked_in_query.filter(ticket__event__organizer=user)
+        # Nếu có event_id, lọc check-in cho sự kiện đó
+        if event_id:
+            checked_in_query = checked_in_query.filter(ticket__event_id=event_id)
+
+        checked_in_sum = checked_in_query.aggregate(sum_checked=Sum('quantity'))['sum_checked'] or 0
 
         # series theo ngay hoac thang
         trunc_func = TruncDay if group_by == 'day' else TruncMonth
         series_qs = details.annotate(period=trunc_func('booking__created_at')) \
-                           .values('period') \
-                           .annotate(tickets=Sum('quantity'),
-                                     revenue=Sum(revenue_expr)) \
-                           .order_by('period')
+            .values('period') \
+            .annotate(tickets=Sum('quantity'),
+                      revenue=Sum(revenue_expr)) \
+            .order_by('period')
 
         series = []
         for row in series_qs:
@@ -1222,13 +1218,24 @@ class OrganizerStatsViewSet(GenericViewSet):
                 'revenue': float(row.get('revenue') or 0)
             })
 
+        # === START: ADDED CODE ===
+        # Lấy danh sách sự kiện của organizer để hiển thị trên bộ lọc
+        organizer_events_qs = Event.objects.all()
+        if user.role == 'organizer':
+            organizer_events_qs = organizer_events_qs.filter(organizer=user)
+
+        # Serialize dữ liệu sự kiện (chỉ lấy id và name cho gọn)
+        events_for_filter = list(organizer_events_qs.values('id', 'name'))
+        # === END: ADDED CODE ===
+
         return Response({
             'totals': {
                 'tickets_sold': tickets_sold,
                 'revenue': revenue,
                 'checked_in': checked_in_sum
             },
-            'series': series
+            'series': series,
+            'events': events_for_filter  # Trả về danh sách sự kiện trong cùng response
         }, status=status.HTTP_200_OK)
 
 
