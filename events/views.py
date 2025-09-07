@@ -129,7 +129,6 @@ class UserViewSet(viewsets.ModelViewSet):
 class OrganizerViewSet(viewsets.GenericViewSet):
     # Chỉ lấy những user có role là 'organizer'
     queryset = User.objects.filter(role='organizer')
-
     # Dùng serializer để xử lý dữ liệu đầu vào
     serializer_class = OrganizerRegisterSerializer
 
@@ -137,11 +136,17 @@ class OrganizerViewSet(viewsets.GenericViewSet):
     permission_classes_by_action = {
         'create': [AllowAny],  # Ai cũng có thể đăng ký
         'approve': [IsAdminUser],  # Chỉ admin mới được duyệt
+        'request_approval': [IsAuthenticated],
     }
 
     # Gán permission theo action hiện tại
     def get_permissions(self):
-        return [permission() for permission in self.permission_classes_by_action.get(self.action, [AllowAny])]
+        # Trả về một instance của mỗi class permission
+        try:
+            return [permission() for permission in self.permission_classes_by_action[self.action]]
+        except KeyError:
+            # Mặc định cho các action không được định nghĩa, ví dụ như swagger
+            return [AllowAny()]
 
     # Xử lý đăng ký organizer (POST /organizers/)
     def create(self, request):
@@ -170,6 +175,45 @@ class OrganizerViewSet(viewsets.GenericViewSet):
         except User.DoesNotExist:
             return Response({'detail': 'Không tìm thấy người dùng.'}, status=status.HTTP_404_NOT_FOUND)
 
+    # Endpoint: POST /api/organizers/request-approval/
+    @action(detail=False, methods=['post'], url_path='request-approval')
+    def request_approval(self, request):
+        user = request.user
+
+        # 1. Kiểm tra người dùng có phải là organizer không
+        if user.role != 'organizer':
+            return Response(
+                {'detail': 'Tài khoản của bạn không phải là nhà tổ chức.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # 2. Kiểm tra tài khoản đã được duyệt chưa
+        if user.is_approved:
+            return Response(
+                {'detail': 'Tài khoản của bạn đã được duyệt rồi.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 3. Tìm tài khoản admin duy nhất
+        admin = User.objects.filter(role='admin').first()
+        if not admin:
+            return Response(
+                {'detail': 'Lỗi hệ thống: Không tìm thấy tài khoản quản trị viên.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # 4. Tạo thông báo cho admin
+        Notification.objects.create(
+            user=admin,
+            notification_type='organizer_approval_request',
+            subject=f'Yêu cầu duyệt tài khoản từ "{user.username}"',
+            message=f'Nhà tổ chức {user.username} (Email: {user.email}) đã gửi yêu cầu cấp quyền tạo sự kiện. Vui lòng vào trang quản trị để xem xét.'
+        )
+
+        return Response(
+            {'detail': 'Yêu cầu của bạn đã được gửi thành công đến quản trị viên.'},
+            status=status.HTTP_200_OK
+        )
 
 class EventFilter(filters.FilterSet):
     date__gte = filters.DateFilter(field_name="date", lookup_expr='gte')  # Từ ngày
