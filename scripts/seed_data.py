@@ -18,6 +18,9 @@ def run():
             email="admin@example.com",
             password="123456"
         )
+        admin_user = User.objects.get(username = "admin")
+        admin_user.role = "admin"
+        admin_user.save()
         print("✅ Đã tạo tài khoản admin")
     else:
         print("⚠️ Admin đã tồn tại")
