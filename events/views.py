@@ -261,6 +261,18 @@ class EventViewSet(viewsets.ModelViewSet):
             return EventCreateSerializer
         return EventSerializer
 
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        # luu doi tuong voi du lieu da duoc xac thuc
+        self.perform_update(serializer)
+
+        # tra ve du lieu da duoc cap nhat
+        return Response(serializer.data)
+
+
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
     def stats(self, request, pk=None):
         # Lấy sự kiện theo ID từ URL
