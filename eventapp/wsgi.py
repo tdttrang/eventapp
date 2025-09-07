@@ -9,6 +9,8 @@ https://docs.djangoproject.com/en/4.2/howto/deployment/wsgi/
 # them vao cho railway chay
 # import eventlet
 # eventlet.monkey_patch()
+from gevent import monkey
+monkey.patch_all()
 
 import os
 

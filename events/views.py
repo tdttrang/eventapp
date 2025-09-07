@@ -211,10 +211,6 @@ class EventViewSet(viewsets.ModelViewSet):
         # Các hành động khác thì ai cũng xem được
         return [permissions.AllowAny()]
 
-    def perform_create(self, serializer):
-        # Khi tạo sự kiện, tự động gán organizer là người đang đăng nhập
-        serializer.save(organizer=self.request.user)
-
     def get_serializer_class(self):
         # Dùng EventCreateSerializer khi tạo mới để kiểm tra quyền và gán organizer
         if self.action == 'create':
