@@ -1501,6 +1501,8 @@ def paypal_return(request, booking_id):
             qr_public_id = generate_qr_code(qr_data)
             booking.qr_code = qr_public_id
 
+            booking.refresh_from_db()
+
             booking.save()
             print(f">>> DEBUG: Booking {booking.id} status after save: {booking.status}") # Thêm dòng này
 
