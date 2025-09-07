@@ -12,8 +12,8 @@ from .views import (
 # Tạo router tự động
 router = DefaultRouter()
 router.register(r'users', UserViewSet)
-router.register(r'events', EventViewSet)
-router.register(r'tickets', TicketViewSet)
+router.register(r'events', EventViewSet, basename='event')
+router.register(r'tickets', TicketViewSet, basename='ticket')
 router.register(r'bookings', BookingViewSet)
 router.register(r'notifications', NotificationViewSet, basename='notification')
 router.register(r'organizers', OrganizerViewSet, basename='organizer')
