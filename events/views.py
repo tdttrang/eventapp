@@ -384,6 +384,7 @@ class TicketViewSet(viewsets.ModelViewSet):
 
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['event']
+    ordering = ['id']
 
     def get_permissions(self):
         # Chỉ organizer đã duyệt mới được tạo/sửa/xóa vé
