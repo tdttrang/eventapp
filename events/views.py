@@ -378,9 +378,12 @@ class EventViewSet(viewsets.ModelViewSet):
 # Quản lý vé cho từng sự kiện
 # -----------------------
 class TicketViewSet(viewsets.ModelViewSet):
-    queryset = Ticket.objects.all()
+    # queryset = Ticket.objects.all()
     serializer_class = TicketSerializer
     permission_classes = [IsAuthenticated]
+
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['event']
 
     def get_permissions(self):
         # Chỉ organizer đã duyệt mới được tạo/sửa/xóa vé
@@ -389,9 +392,12 @@ class TicketViewSet(viewsets.ModelViewSet):
         return [permissions.AllowAny()]
 
     def get_queryset(self):
-        event_id = self.request.query_params.get('event_id')
-        if event_id:
-            return Ticket.objects.filter(event_id=event_id)
+        user = self.request.user
+        # Nếu là organizer, chỉ trả về vé trong các sự kiện họ sở hữu
+        if user.is_authenticated and user.role == 'organizer':
+            return Ticket.objects.filter(event__organizer=user)
+
+        # Với các role khác, trả về tất cả vé
         return Ticket.objects.all()
 
     @action(detail=False, methods=['get'], url_path='stats-by-time', permission_classes=[IsAdmin | IsApprovedOrganizer])
