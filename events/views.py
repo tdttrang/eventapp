@@ -887,8 +887,9 @@ class BookingViewSet(viewsets.ModelViewSet):
                 # --- SUCCESS PATH ---
                 print(f"SUCCESS: Capture for Booking {booking.id} completed.")
                 booking.status = "paid"
-                # Add any other logic here (like generating QR code, sending email, etc.)
                 booking.save()
+                booking.refresh_from_db()
+                print(f"SUCCESS: Booking {booking.id} final status in DB: {booking.status}")
 
                 # Only return success if the database was updated
                 return Response({
@@ -1501,9 +1502,10 @@ def paypal_return(request, booking_id):
             qr_public_id = generate_qr_code(qr_data)
             booking.qr_code = qr_public_id
 
+            booking.save()
+
             booking.refresh_from_db()
 
-            booking.save()
             print(f">>> DEBUG: Booking {booking.id} status after save: {booking.status}") # Thêm dòng này
 
             # --- Gửi email ---
