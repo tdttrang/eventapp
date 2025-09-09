@@ -19,7 +19,7 @@ from oauth2_provider.models import AccessToken, Application
 from oauthlib.common import generate_token
 from django.contrib.auth import get_user_model
 from django.db.models.functions import TruncMonth, TruncQuarter, TruncDay
-from django.db.models import Count, Sum, F, ExpressionWrapper, DecimalField
+from django.db.models import Count, Sum, F, ExpressionWrapper, DecimalField, Q
 from .models import (
     User, Event, EventReview, EventReviewReply,
     Ticket, Booking, Notification, BookingDetail
@@ -53,7 +53,53 @@ from rest_framework.exceptions import PermissionDenied
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
+    # Mapping quyền theo action
+    permission_classes_by_action = {
+        # admin-only
+        'list': [IsAdmin],
+        'retrieve': [IsAdmin],
+        'update': [IsAdmin],
+        'partial_update': [IsAdmin],
+        'destroy': [IsAdmin],
+        'set_role': [IsAdmin],
+        'deactivate': [IsAdmin],
+
+        # mở cho tất cả
+        'register': [AllowAny],
+
+        # user thường dùng
+        'me': [IsAuthenticated],
+    }
+
+    def get_permissions(self):
+        # lấy permissions theo action
+        try:
+            # tạo instance từ các class permission đã map
+            return [perm() for perm in self.permission_classes_by_action[self.action]]
+        except KeyError:
+            # Mặc định: yêu cầu đăng nhập (instance)
+            return [IsAuthenticated()]  # <-- sửa: tạo instance (không phải class)
+
+    # action doi role cho admin
+    @action(detail=True, methods=['post'], url_path='set-role')
+    def set_role(self, request, pk=None):
+        user = self.get_object()
+        role = request.data.get('role')
+        if role not in dict(User.ROLE_CHOICES):
+            return Response({'detail': 'Invalid role'}, status=status.HTTP_400_BAD_REQUEST)
+        user.role = role
+        user.save()
+        return Response(UserSerializer(user, context={'request': request}).data)
+
+    # action khoa tai khoan user cho admin
+    @action(detail=True, methods=['post'], url_path='deactivate')
+    def deactivate(self, request, pk=None):
+        user = self.get_object()
+        user.is_active = False
+        user.save()
+        return Response({'detail': 'User deactivated'})
+
 
     # tạo endpoint /users/register, mở quyền cho tất cả (allowany)
     @action(detail=False, methods=['post'], permission_classes=[AllowAny], serializer_class=UserRegisterSerializer,
@@ -195,12 +241,17 @@ class OrganizerViewSet(viewsets.GenericViewSet):
             )
 
         # 3. Tìm tài khoản admin duy nhất
-        admin = User.objects.filter(role='admin').first()
+        # admin = User.objects.filter(role='admin').first()
+
+        admin = User.objects.filter(is_staff=True).first()
         if not admin:
-            return Response(
-                {'detail': 'Lỗi hệ thống: Không tìm thấy tài khoản quản trị viên.'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            # fallback: tìm theo role='admin' (nếu bạn có cách tạo admin kiểu cũ)
+            admin = User.objects.filter(role='admin').first()
+            if not admin:
+                return Response(
+                    {'detail': 'Lỗi hệ thống: Không tìm thấy tài khoản quản trị viên.'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
 
         # 4. Tạo thông báo cho admin
         Notification.objects.create(
@@ -249,10 +300,11 @@ class EventViewSet(viewsets.ModelViewSet):
         return super().get_queryset()
 
     def get_permissions(self):
-        # Nếu là tạo, sửa, xóa thì cần organizer đã được duyệt
-        if self.action in ['create', 'update', 'destroy']:
-            return [IsApprovedOrganizer()]
-        # Các hành động khác thì ai cũng xem được
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            user = self.request.user
+            if user.is_authenticated and (user.is_staff or user.role == 'admin'):
+                return [IsAdmin()]  # quyền admin
+            return [IsApprovedOrganizer()]  # organizer đã duyệt
         return [permissions.AllowAny()]
 
     def get_serializer_class(self):
@@ -303,9 +355,12 @@ class EventViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='dashboard-stats',
-            permission_classes=[IsAdmin | IsApprovedOrganizer])
+            permission_classes=[IsAuthenticated])
     def dashboard_stats(self, request):
         user = request.user
+        if not (user.is_authenticated and (
+                user.is_staff or user.role == 'admin' or (user.role == 'organizer' and user.is_approved))):
+            return Response({'detail': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
 
         events = self.get_queryset()
         details = BookingDetail.objects.all()
@@ -332,14 +387,13 @@ class EventViewSet(viewsets.ModelViewSet):
             )
             .order_by('month')
         )
-        # Fix total_revenue: Dùng aggregate thay vì sum list (tối ưu, không fetch all)
-        total_revenue_agg = details.aggregate(
-            total=Sum(revenue_expression, filter=F('booking__status') == 'paid')
+
+        total_revenue_agg = details.filter(booking__status='paid').aggregate(
+            total=Sum(revenue_expression)
         )['total'] or 0
 
-        # Total_tickets cũng aggregate cho nhất quán
-        total_tickets_agg = details.aggregate(
-            total=Sum('quantity', filter=F('booking__status') == 'paid')
+        total_tickets_agg = details.filter(booking__status='paid').aggregate(
+            total=Sum('quantity')
         )['total'] or 0
 
         return Response({
@@ -413,9 +467,13 @@ class TicketViewSet(viewsets.ModelViewSet):
         # Với các role khác, trả về tất cả vé
         return Ticket.objects.all()
 
-    @action(detail=False, methods=['get'], url_path='stats-by-time', permission_classes=[IsAdmin | IsApprovedOrganizer])
+    @action(detail=False, methods=['get'], url_path='stats-by-time', permission_classes=[IsAuthenticated])
     def stats_by_time(self, request):
         user = request.user
+        if not (user.is_authenticated and (
+                user.is_staff or user.role == 'admin' or (user.role == 'organizer' and user.is_approved))):
+            return Response({'detail': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
         mode = request.query_params.get('mode', 'month')
         trunc_func = TruncMonth if mode == 'month' else TruncQuarter
 
@@ -1132,22 +1190,53 @@ class AdminStatsViewSet(GenericViewSet):
 
     @action(detail=False, methods=['get'])
     def global_stats(self, request):
+        # tinh tong
+        total_events= Event.objects.count()
+        total_users= User.objects.count()
+
         # Update dùng details filter paid
         details = BookingDetail.objects.filter(booking__status='paid')
-        monthly_data = (
-            details.annotate(month=TruncMonth('booking__created_at'))
+        revenue_expr = ExpressionWrapper(
+            F('ticket__price') * F('quantity'),  # dùng ticket__price
+            output_field=DecimalField(max_digits=14, decimal_places=2)
+        )
+        monthly_revenue = (
+            details.annotate(month=TruncMonth('booking__created_at'))  # booking__created_at
             .values('month')
-            .annotate(
-                total_participants=Sum('quantity'),  # Số vé tham gia
-                total_revenue=Sum('ticket__price' * 'quantity')  # Doanh thu đúng
-            )
+            .annotate(total_revenue=Sum(revenue_expr),
+                      total_tickets=Sum('quantity'))
             .order_by('month')
         )
 
+        # user dang ky theo thang
+        users_by_month = (
+            User.objects.annotate(month=TruncMonth('date_joined'))
+                .values('month')
+                .annotate(count=Count('id'))
+                .order_by('month')
+        )
+
+
+        # monthly_data = (
+        #     details.annotate(month=TruncMonth('booking__created_at'))
+        #     .values('month')
+        #     .annotate(
+        #         total_participants=Sum('quantity'),  # Số vé tham gia
+        #         total_revenue=Sum('ticket__price' * 'quantity')  # Doanh thu đúng
+        #     )
+        #     .order_by('month')
+        # )
+
         # Trả về thống kê toàn hệ thống
+        # return Response({
+        #     'total_events': Event.objects.count(),  # Tổng số sự kiện
+        #     'monthly_stats': monthly_data  # Dữ liệu theo tháng
+        # })
         return Response({
-            'total_events': Event.objects.count(),  # Tổng số sự kiện
-            'monthly_stats': monthly_data  # Dữ liệu theo tháng
+            'total_events': total_events,
+            'total_users': total_users,
+            'monthly_revenue': monthly_revenue,
+            'user_by_month': users_by_month
         })
 
 class OrganizerStatsViewSet(GenericViewSet):

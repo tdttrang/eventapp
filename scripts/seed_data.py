@@ -11,20 +11,6 @@ def run():
 
     User = get_user_model()
 
-    # Tạo admin nếu chưa có
-    # if not User.objects.filter(username="admin").exists():
-    #     User.objects.create_superuser(
-    #         username="admin",
-    #         email="admin@example.com",
-    #         password="123456"
-    #     )
-    #     admin_user = User.objects.get(username = "admin")
-    #     admin_user.role = "admin"
-    #     admin_user.save()
-    #     print("✅ Đã tạo tài khoản admin")
-    # else:
-    #     print("⚠️ Admin đã tồn tại")
-    # Sử dụng update_or_create để đảm bảo admin luôn có vai trò đúng
     admin_user, created = User.objects.update_or_create(
         username="admin",  # Điều kiện để tìm kiếm
         defaults={  # Các trường sẽ được tạo hoặc cập nhật
