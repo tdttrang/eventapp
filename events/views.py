@@ -29,6 +29,7 @@ from .serializers import (
     EventReviewReplySerializer, TicketSerializer, BookingCreateSerializer,
     BookingSerializer, NotificationSerializer, EventCreateSerializer,
     OrganizerRegisterSerializer, UserRegisterSerializer, NotificationCreationSerializer,
+    OrganizerPendingSerializer,
 )
 from .permissions import IsApprovedOrganizer, IsOwner, IsAdmin
 import traceback
@@ -268,9 +269,9 @@ class OrganizerViewSet(viewsets.GenericViewSet):
 
     @action(detail=False, methods=['get'], url_path='pending', permission_classes=[IsAdminUser])
     def pending(self, request):
-        # Lấy tất cả organizer chưa duyệt
         organizers = User.objects.filter(role='organizer', is_approved=False)
-        serializer = self.get_serializer(organizers, many=True, context={'request': request})
+        # Dùng serializer mới thay vì serializer mặc định
+        serializer = OrganizerPendingSerializer(organizers, many=True, context={'request': request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 

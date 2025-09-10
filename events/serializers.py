@@ -48,6 +48,15 @@ class OrganizerRegisterSerializer(serializers.ModelSerializer):
         user.save()
         return user
 
+class OrganizerPendingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'avatar']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['avatar'] = instance.avatar.url if instance.avatar else None
+        return data
 
 # dang ky user
 class UserRegisterSerializer(serializers.ModelSerializer):
