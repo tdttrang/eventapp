@@ -266,6 +266,14 @@ class OrganizerViewSet(viewsets.GenericViewSet):
             status=status.HTTP_200_OK
         )
 
+    @action(detail=False, methods=['get'], url_path='pending', permission_classes=[IsAdminUser])
+    def pending(self, request):
+        # Lấy tất cả organizer chưa duyệt
+        organizers = User.objects.filter(role='organizer', is_approved=False)
+        serializer = self.get_serializer(organizers, many=True, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
 class EventFilter(filters.FilterSet):
     date__gte = filters.DateFilter(field_name="date", lookup_expr='gte')  # Từ ngày
     date__lte = filters.DateFilter(field_name="date", lookup_expr='lte')  # Đến ngày
@@ -1216,22 +1224,6 @@ class AdminStatsViewSet(GenericViewSet):
                 .order_by('month')
         )
 
-
-        # monthly_data = (
-        #     details.annotate(month=TruncMonth('booking__created_at'))
-        #     .values('month')
-        #     .annotate(
-        #         total_participants=Sum('quantity'),  # Số vé tham gia
-        #         total_revenue=Sum('ticket__price' * 'quantity')  # Doanh thu đúng
-        #     )
-        #     .order_by('month')
-        # )
-
-        # Trả về thống kê toàn hệ thống
-        # return Response({
-        #     'total_events': Event.objects.count(),  # Tổng số sự kiện
-        #     'monthly_stats': monthly_data  # Dữ liệu theo tháng
-        # })
         return Response({
             'total_events': total_events,
             'total_users': total_users,
