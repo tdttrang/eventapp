@@ -218,7 +218,28 @@ class OrganizerViewSet(viewsets.GenericViewSet):
 
             organizer.is_approved = True
             organizer.save()
-            return Response({'detail': 'Organizer đã được duyệt thành công.'}, status=status.HTTP_200_OK)
+
+            # organizer
+            Notification.objects.create(
+                user=organizer,
+                notification_type='organizer_approved',
+                subject='Tài khoản của bạn đã được duyệt',
+                message='Chúc mừng! Tài khoản của bạn đã được quản trị viên duyệt. Giờ bạn có thể tạo và quản lý sự kiện.'
+            )
+
+            # admin
+            admin_user = request.user
+            Notification.objects.create(
+                user=admin_user,
+                notification_type='action_log',
+                subject='Bạn đã duyệt một organizer',
+                message=f'Bạn vừa duyệt tài khoản organizer "{organizer.username}" (Email: {organizer.email}).'
+            )
+
+            return Response(
+                {'detail': 'Organizer đã được duyệt thành công.'},
+                status=status.HTTP_200_OK
+            )
         except User.DoesNotExist:
             return Response({'detail': 'Không tìm thấy người dùng.'}, status=status.HTTP_404_NOT_FOUND)
 
